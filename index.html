@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WildfireDB</title>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="config.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         background: #0f1117; color: #e1e4e8; height: 100vh; display: flex; }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: 340px; flex-shrink: 0;
+    background: #161b22; border-right: 1px solid #30363d;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  #sidebar-header {
+    padding: 16px; border-bottom: 1px solid #30363d;
+    background: #0d1117;
+  }
+  #sidebar-header h1 { font-size: 18px; color: #58a6ff; margin-bottom: 4px; }
+  #sidebar-header p  { font-size: 11px; color: #8b949e; }
+  #global-stats { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .stat-chip {
+    background: #21262d; border: 1px solid #30363d;
+    border-radius: 12px; padding: 3px 10px; font-size: 11px; color: #8b949e;
+  }
+  .stat-chip span { color: #58a6ff; font-weight: 600; }
+
+  /* ── Filters ── */
+  #filters {
+    padding: 10px 12px; background: #0d1117;
+    border-bottom: 1px solid #30363d;
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .filter-select {
+    background: #21262d; border: 1px solid #30363d; color: #e1e4e8;
+    border-radius: 6px; padding: 4px 8px; font-size: 12px; cursor: pointer;
+  }
+  .filter-select:focus { outline: none; border-color: #58a6ff; }
+
+  /* ── Fire list ── */
+  #fire-list { overflow-y: auto; flex: 1; }
+  .fire-item {
+    padding: 10px 14px; border-bottom: 1px solid #21262d;
+    cursor: pointer; transition: background 0.1s;
+  }
+  .fire-item:hover { background: #1c2128; }
+  .fire-item.active { background: #1f3148; border-left: 3px solid #58a6ff; }
+  .fire-name { font-size: 13px; font-weight: 600; color: #e1e4e8; }
+  .fire-meta { font-size: 11px; color: #8b949e; margin-top: 2px; }
+  .fire-tags { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; }
+  .tag {
+    font-size: 10px; padding: 2px 6px; border-radius: 10px;
+    font-weight: 500;
+  }
+  .tag-status-completed { background: #1a3a1a; color: #56d364; }
+  .tag-status-pending   { background: #2d2a1a; color: #d29922; }
+  .tag-status-downloading { background: #1a2a3a; color: #58a6ff; }
+  .tag-pipeline { background: #21262d; color: #8b949e; }
+
+  /* ── Map ── */
+  #map-container { flex: 1; position: relative; }
+  #map { width: 100%; height: 100%; }
+
+  /* ── Detail panel ── */
+  #detail-panel {
+    width: 300px; flex-shrink: 0;
+    background: #161b22; border-left: 1px solid #30363d;
+    display: flex; flex-direction: column; overflow: hidden;
+    transition: width 0.2s;
+  }
+  #detail-panel.hidden { width: 0; border: none; }
+  #detail-header {
+    padding: 14px; border-bottom: 1px solid #30363d;
+    background: #0d1117; display: flex; justify-content: space-between;
+  }
+  #detail-header h2 { font-size: 14px; color: #e1e4e8; }
+  #close-detail { background: none; border: none; color: #8b949e;
+                  cursor: pointer; font-size: 18px; line-height: 1; }
+  #detail-body { overflow-y: auto; flex: 1; padding: 12px; }
+
+  /* ── Damage chart ── */
+  .section-title {
+    font-size: 11px; font-weight: 600; color: #8b949e;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin: 12px 0 6px;
+  }
+  .dmg-bar-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .dmg-label { font-size: 11px; color: #8b949e; width: 80px; flex-shrink: 0; }
+  .dmg-bar-bg { flex: 1; height: 10px; background: #21262d; border-radius: 5px; overflow: hidden; }
+  .dmg-bar-fill { height: 100%; border-radius: 5px; transition: width 0.4s; }
+  .dmg-count { font-size: 11px; color: #8b949e; width: 40px; text-align: right; }
+
+  /* ── Source chips ── */
+  .source-list { display: flex; flex-direction: column; gap: 4px; }
+  .source-row {
+    background: #21262d; border-radius: 6px; padding: 6px 10px;
+    font-size: 11px; display: flex; justify-content: space-between;
+  }
+  .source-name { color: #58a6ff; }
+  .source-type-human { color: #56d364; font-size: 10px; }
+  .source-type-model { color: #d29922; font-size: 10px; }
+
+  /* ── Building popup ── */
+  .building-label-row {
+    background: #1c2128; border-radius: 6px; padding: 8px;
+    margin-bottom: 6px; font-size: 11px;
+  }
+  .building-source { color: #58a6ff; font-weight: 600; margin-bottom: 3px; }
+  .building-dmg { color: #e1e4e8; }
+
+  /* ── Timeline ── */
+  #timeline {
+    position: absolute; bottom: 16px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(13,17,23,0.92); border: 1px solid #30363d;
+    border-radius: 10px; padding: 10px 16px; min-width: 420px;
+    backdrop-filter: blur(6px);
+    display: none;
+  }
+  #timeline.visible { display: block; }
+  #timeline h3 { font-size: 11px; color: #8b949e; margin-bottom: 6px; }
+  #timeline-months { display: flex; gap: 3px; flex-wrap: wrap; }
+  .month-chip {
+    font-size: 10px; padding: 3px 7px; border-radius: 4px;
+    cursor: pointer; transition: background 0.1s;
+    background: #21262d; color: #8b949e; border: 1px solid #30363d;
+  }
+  .month-chip:hover { background: #2d333b; }
+  .month-chip.post { background: #1a2a3a; color: #58a6ff; border-color: #1f6feb; }
+  .month-chip.pre  { background: #1a2d1a; color: #56d364; border-color: #238636; }
+  .month-chip.selected { border-color: #e1e4e8 !important; color: #e1e4e8 !important; }
+
+  /* ── Map controls ── */
+  #map-legend {
+    position: absolute; bottom: 16px; right: 12px;
+    background: rgba(13,17,23,0.92); border: 1px solid #30363d;
+    border-radius: 8px; padding: 10px 14px; font-size: 11px;
+    backdrop-filter: blur(6px);
+  }
+  #imagery-panel {
+    position: absolute; top: 12px; right: 12px; width: 300px;
+    background: rgba(13,17,23,0.92); border: 1px solid #30363d;
+    border-radius: 10px; padding: 12px 14px; font-size: 11px;
+    backdrop-filter: blur(6px); display: none; z-index: 95;
+  }
+  #imagery-panel.visible { display: block; }
+  #imagery-panel h4 { color: #8b949e; margin-bottom: 8px; text-transform: uppercase;
+    letter-spacing: .5px; font-size: 10px; }
+  #ip-date { font-size: 14px; color: #58a6ff; font-weight: 600; }
+  #ip-sub  { font-size: 10px; color: #8b949e; margin-bottom: 8px; }
+  #ip-slider { width: 100%; margin: 4px 0; cursor: pointer; }
+  .ip-controls { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .ip-btn {
+    background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+    border-radius: 6px; padding: 2px 9px; cursor: pointer; font-size: 13px;
+  }
+  .ip-btn:hover { background: #30363d; }
+  #ip-opacity { width: 70px; cursor: pointer; }
+  #year-bar {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(13,17,23,0.92); border: 1px solid #30363d;
+    border-radius: 10px; padding: 8px 16px; font-size: 12px; color: #c9d1d9;
+    backdrop-filter: blur(6px); display: flex; align-items: center; gap: 12px;
+    z-index: 95;
+  }
+  #year-slider { width: 320px; cursor: pointer; }
+  #year-label { font-size: 18px; font-weight: 700; color: #58a6ff; min-width: 48px; text-align: center; }
+  #year-count { font-size: 10px; color: #8b949e; }
+  #mosaic-bar {
+    position: absolute; top: 200px; right: 12px; width: 300px;
+    background: rgba(13,17,23,0.92); border: 1px solid #30363d;
+    border-radius: 10px; padding: 10px 14px; font-size: 11px; color: #c9d1d9;
+    backdrop-filter: blur(6px); display: none; z-index: 95;
+  }
+  #mosaic-bar.visible { display: block; }
+  #mosaic-bar h4 { color: #8b949e; margin-bottom: 6px; text-transform: uppercase;
+    letter-spacing: .5px; font-size: 10px; }
+  .mb-btns { display: flex; gap: 6px; }
+  .mb-btn { flex: 1; background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+    border-radius: 6px; padding: 4px 0; cursor: pointer; font-size: 11px; text-align: center; }
+  .mb-btn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  .mb-btn:hover { background: #30363d; }
+  #mb-info { font-size: 10px; color: #8b949e; margin-top: 6px; min-height: 12px; }
+
+  /* Pre/Post swipe ("sliding door") overlay — fills the map */
+  #swipe { position: absolute; inset: 0; display: none; overflow: hidden; z-index: 4;
+    pointer-events: none; }
+  #swipe.active { display: block; }
+  #swipe img { position: absolute; pointer-events: none; user-select: none;
+    -webkit-user-drag: none; max-width: none; }
+  #swipe-post { z-index: 2; }
+  #swipe-pre  { z-index: 1; }
+  #swipe-handle { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.5); cursor: ew-resize; pointer-events: auto; z-index: 3; }
+  #swipe-handle::before { content: '⇆'; position: absolute; top: 50%; left: -16px;
+    width: 32px; height: 32px; margin-top: -16px; background: #fff; color: #111;
+    border-radius: 50%; text-align: center; line-height: 32px; font-size: 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+  .swipe-tag { position: absolute; top: 10px; background: rgba(13,17,23,.75); color: #fff;
+    padding: 3px 9px; font-size: 11px; border-radius: 4px; z-index: 3; pointer-events: none; }
+  #map-legend h4 { color: #8b949e; margin-bottom: 6px; text-transform: uppercase;
+                    font-size: 10px; letter-spacing: 0.5px; }
+  .legend-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+  #loading-overlay {
+    position: absolute; inset: 0; background: rgba(13,17,23,0.7);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100; font-size: 14px; color: #58a6ff;
+    display: none;
+  }
+
+  /* View toggle button + Analysis dashboard (full-page overlay) */
+  #view-toggle { margin-top: 8px; width: 100%; background: #1f6feb; color: #fff; border: none;
+    border-radius: 6px; padding: 7px 0; font-size: 12px; cursor: pointer; font-weight: 600; }
+  #view-toggle:hover { background: #388bfd; }
+  #analysis-view { position: fixed; inset: 0; background: #0d1117; z-index: 300;
+    display: none; flex-direction: column; color: #c9d1d9; }
+  #analysis-view.active { display: flex; }
+  #an-header { display: flex; align-items: center; gap: 14px; padding: 10px 16px;
+    border-bottom: 1px solid #30363d; flex-wrap: wrap; }
+  #an-header h2 { font-size: 16px; color: #58a6ff; margin-right: 6px; }
+  #an-back { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px;
+    padding: 6px 12px; cursor: pointer; font-size: 12px; }
+  #an-back:hover { background: #30363d; }
+  .an-metric-btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px;
+    padding: 6px 10px; cursor: pointer; font-size: 12px; }
+  .an-metric-btn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  #an-year-wrap { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-left: auto; }
+  #an-year { width: 220px; }
+  #an-body { flex: 1; display: flex; min-height: 0; }
+  #an-map { flex: 1.4; position: relative; }
+  #an-side { flex: 1; display: flex; flex-direction: column; border-left: 1px solid #30363d;
+    overflow-y: auto; }
+  #an-chart-box { padding: 12px 16px; border-bottom: 1px solid #30363d; }
+  #an-chart-box h3, #an-facet-box h3 { font-size: 12px; color: #8b949e; text-transform: uppercase;
+    letter-spacing: .5px; margin-bottom: 8px; }
+  #an-facet-box { padding: 12px 16px; }
+  #an-facet { width: 100%; border-radius: 6px; background: #fff; }
+  #an-desc { font-size: 11px; color: #8b949e; padding: 0 16px 12px; line-height: 1.5; }
+  #an-legend { position: absolute; bottom: 14px; left: 14px; background: rgba(13,17,23,.85);
+    border: 1px solid #30363d; border-radius: 8px; padding: 8px 12px; font-size: 11px; z-index: 5; }
+  #an-legend .bar { height: 10px; width: 180px; border-radius: 3px; margin: 4px 0;
+    background: linear-gradient(to right,#440154,#3b528b,#21918c,#5ec962,#fde725); }
+  #an-tip { position: absolute; pointer-events: none; background: rgba(13,17,23,.92);
+    border: 1px solid #30363d; border-radius: 5px; padding: 4px 8px; font-size: 11px;
+    z-index: 6; display: none; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <div id="sidebar-header">
+    <h1>WildfireDB</h1>
+    <p>Multi-source wildfire damage assessment</p>
+    <button id="view-toggle" onclick="openAnalysis()">📊 Analysis dashboard ▸</button>
+    <div id="global-stats">
+      <div class="stat-chip">Fires: <span id="gs-fires">—</span></div>
+      <div class="stat-chip">Labels: <span id="gs-labels">—</span></div>
+      <div class="stat-chip">Footprints: <span id="gs-footprints">—</span></div>
+      <div class="stat-chip">Scenes: <span id="gs-scenes">—</span></div>
+    </div>
+  </div>
+  <div id="filters">
+    <select class="filter-select" id="filter-state" onchange="applyFilters()">
+      <option value="">All states</option>
+    </select>
+    <select class="filter-select" id="filter-year" onchange="applyFilters()">
+      <option value="">All years</option>
+    </select>
+    <select class="filter-select" id="filter-status" onchange="applyFilters()">
+      <option value="">All status</option>
+    </select>
+  </div>
+  <div id="fire-list"></div>
+</div>
+
+<!-- Map -->
+<div id="map-container">
+  <div id="map"></div>
+
+  <!-- Pre/Post swipe overlay (sliding-door before/after) -->
+  <div id="swipe">
+    <img id="swipe-pre" alt="">
+    <img id="swipe-post" alt="">
+    <div class="swipe-tag" id="swipe-tag-pre">Pre-fire</div>
+    <div class="swipe-tag" id="swipe-tag-post">Post-fire</div>
+    <div id="swipe-handle"></div>
+  </div>
+
+  <!-- Year view control (top-center) -->
+  <div id="year-bar">
+    <label style="cursor:pointer;display:flex;align-items:center;gap:6px">
+      <input type="checkbox" onchange="toggleYearView(this)" style="cursor:pointer">Year view
+    </label>
+    <input type="range" id="year-slider" min="2015" max="2025" step="1" value="2025" disabled
+           oninput="onYearSlider(this.value)">
+    <span id="year-label">—</span>
+    <span id="year-count"></span>
+  </div>
+  <div id="loading-overlay">Loading buildings...</div>
+  <div id="footprint-hint" style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%);
+       background:rgba(13,17,23,0.85);color:#7cc0ff;font-size:11px;padding:5px 12px;border-radius:14px;
+       border:1px solid #30363d;z-index:90;pointer-events:none;display:none">
+    Zoom in to see building footprints
+  </div>
+  <div id="map-legend">
+    <h4>Damage Class</h4>
+    <div class="legend-row"><div class="legend-dot" style="background:#aaaaaa"></div><span>Unknown</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:#2ecc71"></div><span>No Damage</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:#f1c40f"></div><span>Affected</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:#e67e22"></div><span>Partial</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:#e74c3c"></div><span>Destroyed</span></div>
+    <div class="legend-row" style="margin-top:6px;border-top:1px solid #30363d;padding-top:6px">
+      <div class="legend-dot" style="background:#4ea1ff"></div><span>Footprint (zoom ≥ 13)</span></div>
+    <label class="legend-row" style="margin-top:6px;border-top:1px solid #30363d;padding-top:6px;cursor:pointer">
+      <input type="checkbox" onchange="toggleMtbs(this)" style="margin:0 6px 0 0;cursor:pointer">
+      <div class="legend-dot" style="background:#e74c3c"></div><span>Historical fires (MTBS)</span></label>
+    <label class="legend-row" style="cursor:pointer">
+      <input type="checkbox" onchange="toggleImagery(this)" style="margin:0 6px 0 0;cursor:pointer">
+      <div class="legend-dot" style="background:#58a6ff"></div><span>Satellite imagery</span></label>
+    <label class="legend-row" style="cursor:pointer">
+      <input type="checkbox" onchange="toggleSelfPerimeter(this)" style="margin:0 6px 0 0;cursor:pointer">
+      <div class="legend-dot" style="background:#22d3ee"></div><span>Self-made perimeter</span></label>
+    <div class="legend-row" style="margin-top:6px;border-top:1px solid #30363d;padding-top:6px">
+      <span style="display:inline-block;width:14px;border-top:1.5px dashed #ffb38a;margin-right:6px"></span>
+      <span>Approximate extent (no true perimeter)</span></div>
+  </div>
+
+  <!-- Imagery time-slider (top-right) -->
+  <div id="imagery-panel">
+    <h4>PlanetScope Imagery</h4>
+    <div id="ip-date">—</div>
+    <div id="ip-sub">select a fire to load scenes</div>
+    <input type="range" id="ip-slider" min="0" max="0" value="0" disabled
+           oninput="onSliderInput(this.value)">
+    <div class="ip-controls">
+      <button class="ip-btn" onclick="stepScene(-1)">‹</button>
+      <button class="ip-btn" id="ip-play" onclick="togglePlay()">▶</button>
+      <button class="ip-btn" onclick="stepScene(1)">›</button>
+      <span id="ip-count" style="color:#8b949e;margin-left:auto">0 / 0</span>
+    </div>
+    <div class="ip-controls">
+      <span style="color:#8b949e">opacity</span>
+      <input type="range" id="ip-opacity" min="0" max="100" value="85"
+             oninput="setImageryOpacity(this.value)">
+    </div>
+  </div>
+
+  <!-- Pre/post composite mosaic (per selected fire) -->
+  <div id="mosaic-bar">
+    <h4>Pre / Post Composite</h4>
+    <div class="mb-btns">
+      <div class="mb-btn" id="mb-pre"   onclick="showMosaic('pre')">Pre-fire</div>
+      <div class="mb-btn" id="mb-post"  onclick="showMosaic('post')">Post-fire</div>
+      <div class="mb-btn" id="mb-swipe" onclick="startSwipe()">Swipe</div>
+      <div class="mb-btn" id="mb-off"   onclick="hideMosaic()">Off</div>
+    </div>
+    <div id="mb-info"></div>
+  </div>
+  <div id="timeline">
+    <h3>Image Timeline — <span id="tl-fire-name"></span></h3>
+    <div id="timeline-months"></div>
+  </div>
+</div>
+
+<!-- Detail panel -->
+<div id="detail-panel" class="hidden">
+  <div id="detail-header">
+    <h2 id="detail-title">Fire Details</h2>
+    <button id="close-detail" onclick="closeDetail()">×</button>
+  </div>
+  <div id="detail-body"></div>
+</div>
+
+<!-- Analysis dashboard (full-page overlay) -->
+<div id="analysis-view">
+  <div id="an-header">
+    <h2>Coverage Analysis</h2>
+    <button class="an-metric-btn active" data-m="m1_outside" onclick="anSetMetric('m1_outside')">1 · Outside perimeter</button>
+    <button class="an-metric-btn" data-m="m2_nofp" onclick="anSetMetric('m2_nofp')">2 · No footprint</button>
+    <button class="an-metric-btn" data-m="m3_fp_nolabel" onclick="anSetMetric('m3_fp_nolabel')">3 · Footprint unlabelled</button>
+    <div id="an-year-wrap">
+      <span id="an-year-label">All years</span>
+      <input type="range" id="an-year" min="0" max="0" value="0" oninput="anSetYearIdx(this.value)">
+      <button class="an-metric-btn" id="an-allyears" onclick="anAllYears()">All</button>
+    </div>
+    <button id="an-back" onclick="closeAnalysis()">✕ Back to map</button>
+  </div>
+  <div id="an-body">
+    <div id="an-map">
+      <div id="an-legend"><div id="an-legend-title">—</div><div class="bar"></div>
+        <div style="display:flex;justify-content:space-between"><span>0%</span><span>100%</span></div>
+        <div style="margin-top:4px;color:#8b949e">grey = no data</div></div>
+      <div id="an-tip"></div>
+    </div>
+    <div id="an-side">
+      <div id="an-chart-box"><h3 id="an-chart-title">National, by year</h3><div id="an-chart"></div></div>
+      <div id="an-desc"></div>
+      <div id="an-facet-box"><h3 id="an-state-title">Click a state on the map to see its yearly trend</h3>
+        <div id="an-state-chart"></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// API base: same-origin by default; on GitHub Pages, set window.WILDFIRE_API
+// (e.g. in config.js) to the public backend URL (Cloudflare tunnel).
+const API = (window.WILDFIRE_API || '').replace(/\/$/, '');
+const ASSET_VER = '4';  // bump to force-refresh cached imagery/mosaic overlays
+const DAMAGE_COLORS = ['#aaaaaa','#2ecc71','#f1c40f','#e67e22','#e74c3c'];
+const DAMAGE_NAMES  = ['Unknown','No Damage','Affected','Partial','Destroyed'];
+
+// ── Map setup ──────────────────────────────────────────────────────────────
+const map = new maplibregl.Map({
+  container: 'map',
+  style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+  center: [-100, 38],
+  zoom: 4,
+});
+
+map.addControl(new maplibregl.NavigationControl(), 'top-left');
+map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
+
+map.on('load', () => {
+  // Perimeter layer
+  map.addSource('perimeter', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }});
+  // Real perimeters (curated / MTBS / NIFC): solid orange with fill.
+  map.addLayer({ id: 'perimeter-fill', type: 'fill', source: 'perimeter',
+    filter: ['!=', ['get', 'perimeter_source'], 'bbox'],
+    paint: { 'fill-color': '#ff6b35', 'fill-opacity': 0.15 }});
+  map.addLayer({ id: 'perimeter-line', type: 'line', source: 'perimeter',
+    filter: ['!=', ['get', 'perimeter_source'], 'bbox'],
+    paint: { 'line-color': '#ff6b35', 'line-width': 2 }});
+  // Approximate extent (bbox of building points, no true perimeter): dashed,
+  // faded, no fill — visually distinct so it isn't read as a real boundary.
+  map.addLayer({ id: 'perimeter-approx', type: 'line', source: 'perimeter',
+    filter: ['==', ['get', 'perimeter_source'], 'bbox'],
+    paint: { 'line-color': '#ffb38a', 'line-width': 1.3,
+             'line-opacity': 0.55, 'line-dasharray': [3, 3] }});
+
+  // Fire sub-clusters (dispersed fires split into building clusters)
+  map.addSource('subclusters', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }});
+  map.addLayer({ id: 'subclusters-fill', type: 'fill', source: 'subclusters',
+    paint: { 'fill-color': '#a78bfa', 'fill-opacity': 0.12 }});
+  map.addLayer({ id: 'subclusters-line', type: 'line', source: 'subclusters',
+    paint: { 'line-color': '#a78bfa', 'line-width': 1.6 }});
+  map.addLayer({ id: 'subclusters-label', type: 'symbol', source: 'subclusters',
+    layout: { 'text-field': ['concat', 'c', ['get', 'cluster'], '  ',
+                             ['to-string', ['get', 'n_buildings']], ' bldg'],
+              'text-size': 10 },
+    paint: { 'text-color': '#c4b5fd', 'text-halo-color': '#0d1117', 'text-halo-width': 1 }});
+
+  // Self-made perimeter (buffered union of surveyed damage points), dashed cyan
+  map.addSource('self-perimeter', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }});
+  map.addLayer({ id: 'self-perimeter-fill', type: 'fill', source: 'self-perimeter',
+    layout: { visibility: 'none' },
+    paint: { 'fill-color': '#22d3ee', 'fill-opacity': 0.08 }});
+  map.addLayer({ id: 'self-perimeter-line', type: 'line', source: 'self-perimeter',
+    layout: { visibility: 'none' },
+    paint: { 'line-color': '#22d3ee', 'line-width': 1.5, 'line-dasharray': [2, 2] }});
+
+  // MTBS historical fire perimeters (nationwide, 1984–2024, toggleable, default off)
+  map.addSource('mtbs', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }});
+  map.addLayer({ id: 'mtbs-fill', type: 'fill', source: 'mtbs',
+    layout: { visibility: 'none' },
+    paint: { 'fill-color': '#c0392b', 'fill-opacity': 0.12 }});
+  map.addLayer({ id: 'mtbs-line', type: 'line', source: 'mtbs',
+    layout: { visibility: 'none' },
+    paint: { 'line-color': '#e74c3c', 'line-width': 0.7, 'line-opacity': 0.6 }});
+
+  // Footprints layer (nationwide OSM building outlines, loaded by viewport)
+  map.addSource('footprints', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }});
+  map.addLayer({ id: 'footprints-fill', type: 'fill', source: 'footprints',
+    minzoom: FOOTPRINT_MIN_ZOOM,
+    paint: { 'fill-color': '#4ea1ff', 'fill-opacity': 0.25, 'fill-outline-color': '#4ea1ff' }});
+  map.addLayer({ id: 'footprints-line', type: 'line', source: 'footprints',
+    minzoom: FOOTPRINT_MIN_ZOOM,
+    paint: { 'line-color': '#7cc0ff', 'line-width': 0.6 }});
+
+  // Buildings layer
+  map.addSource('buildings', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }});
+  map.addLayer({
+    id: 'buildings-circle', type: 'circle', source: 'buildings',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 3, 14, 6],
+      'circle-color': [
+        'match', ['get', 'consensus_damage'],
+        0, '#aaaaaa', 1, '#2ecc71', 2, '#f1c40f', 3, '#e67e22', 4, '#e74c3c',
+        '#aaaaaa'
+      ],
+      'circle-opacity': 0.85,
+      'circle-stroke-width': ['case', ['>=', ['get', 'n_sources'], 2], 1.5, 0],
+      'circle-stroke-color': '#ffffff',
+    }
+  });
+
+  // Unified spatial lookup: any click resolves all layers at that coordinate
+  map.on('click', onMapClick);
+  ['buildings-circle', 'footprints-fill'].forEach(lyr => {
+    map.on('mouseenter', lyr, () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', lyr, () => map.getCanvas().style.cursor = '');
+  });
+
+  map.on('moveend', loadFootprintsInView);
+  map.on('moveend', loadMtbsInView);
+
+  loadGlobalStats();
+  loadFires();
+  loadDispersedList();
+});
+
+// fire_ids that were split into sub-clusters (dispersed fires)
+let dispersedFires = new Set();
+async function loadDispersedList() {
+  try {
+    const ids = await fetch(`${API}/api/analysis/subclusters/parents`).then(r => r.json());
+    dispersedFires = new Set(ids);
+  } catch (e) {}
+}
+
+// ── MTBS historical perimeters (toggleable, viewport-loaded) ─────────────────
+const MTBS_DETAIL_ZOOM = 8;   // below this: national overview of biggest fires
+let mtbsOn = false;
+let mtbsReq = 0;
+
+function toggleMtbs(cb) {
+  mtbsOn = cb.checked;
+  const vis = mtbsOn ? 'visible' : 'none';
+  map.setLayoutProperty('mtbs-fill', 'visibility', vis);
+  map.setLayoutProperty('mtbs-line', 'visibility', vis);
+  if (mtbsOn) loadMtbsInView();
+  else map.getSource('mtbs').setData({ type: 'FeatureCollection', features: [] });
+}
+
+async function loadMtbsInView() {
+  if (!mtbsOn) return;
+  const src = map.getSource('mtbs');
+  if (!src) return;
+  const z = map.getZoom();
+  let url;
+  if (z < MTBS_DETAIL_ZOOM) {
+    // National overview: largest fires only, coarse (precomputed low-res)
+    url = `${API}/api/mtbs?limit=1500`;
+  } else {
+    // Viewport detail: simplify scaled to zoom (finer when closer)
+    const b = map.getBounds();
+    const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(v => v.toFixed(5)).join(',');
+    const simplify = z >= 11 ? 0.0005 : 0.002;
+    url = `${API}/api/mtbs?bbox=${bbox}&simplify=${simplify}&limit=3000`;
+  }
+  const reqId = ++mtbsReq;
+  try {
+    const fc = await fetch(url).then(r => r.json());
+    if (reqId !== mtbsReq) return;   // superseded by a newer move
+    src.setData(fc);
+  } catch (e) { console.warn('MTBS load failed', e); }
+}
+
+// ── PlanetScope imagery + time slider ────────────────────────────────────────
+let imageryOn = false;
+let imageryScenes = [];     // [{scene_id, acquired_at, cloud_cover}]
+let imageryIdx = 0;
+let imageryReq = 0;
+let playTimer = null;
+
+function toggleImagery(cb) {
+  imageryOn = cb.checked;
+  document.getElementById('imagery-panel').classList.toggle('visible', imageryOn);
+  if (imageryOn) {
+    if (selectedFireId) loadFireScenes(selectedFireId);
+    else setImageryInfo('—', 'select a fire to load scenes');
+  } else {
+    stopPlay();
+    if (map.getLayer('scene-img-layer')) map.setLayoutProperty('scene-img-layer', 'visibility', 'none');
+  }
+}
+
+function setImageryInfo(date, sub) {
+  document.getElementById('ip-date').textContent = date;
+  document.getElementById('ip-sub').textContent = sub;
+}
+
+async function loadFireScenes(fireId) {
+  setImageryInfo('—', 'loading scenes…');
+  let scenes = [];
+  try {
+    scenes = await fetch(`${API}/api/scenes?fire_id=${fireId}&has_local=true&limit=2000`).then(r => r.json());
+  } catch (e) { setImageryInfo('—', 'failed to load scenes'); return; }
+  scenes = scenes.filter(s => s.acquired_at).sort((a, b) => a.acquired_at.localeCompare(b.acquired_at));
+  imageryScenes = scenes;
+  imageryIdx = 0;
+  const slider = document.getElementById('ip-slider');
+  slider.max = Math.max(0, scenes.length - 1);
+  slider.value = 0;
+  slider.disabled = scenes.length === 0;
+  if (!scenes.length) { setImageryInfo('—', 'no local imagery for this fire'); updateCount(); return; }
+  showSceneAt(0);
+}
+
+function updateCount() {
+  document.getElementById('ip-count').textContent =
+    `${imageryScenes.length ? imageryIdx + 1 : 0} / ${imageryScenes.length}`;
+}
+
+function onSliderInput(v) { imageryIdx = +v; showSceneAt(imageryIdx); }
+
+function stepScene(d) {
+  if (!imageryScenes.length) return;
+  imageryIdx = Math.min(imageryScenes.length - 1, Math.max(0, imageryIdx + d));
+  document.getElementById('ip-slider').value = imageryIdx;
+  showSceneAt(imageryIdx);
+}
+
+async function showSceneAt(idx) {
+  const sc = imageryScenes[idx];
+  if (!sc) return;
+  const date = sc.acquired_at.slice(0, 10);
+  const cloud = sc.cloud_cover != null ? ` · ${Math.round(sc.cloud_cover * 100)}% cloud` : '';
+  setImageryInfo(date, `scene ${sc.scene_id}${cloud}`);
+  updateCount();
+  const reqId = ++imageryReq;
+  let meta;
+  try {
+    meta = await fetch(`${API}/api/scene/${sc.scene_id}`).then(r => r.json());
+  } catch (e) { return; }
+  if (reqId !== imageryReq) return;          // superseded by a newer selection
+  const url = `${API || location.origin}${meta.image_url}?v=${ASSET_VER}`;
+  updateSceneImage(url, meta.coordinates);
+}
+
+function updateSceneImage(url, coordinates) {
+  if (map.getSource('scene-img')) {
+    map.getSource('scene-img').updateImage({ url, coordinates });
+    map.setLayoutProperty('scene-img-layer', 'visibility', 'visible');
+  } else {
+    map.addSource('scene-img', { type: 'image', url, coordinates });
+    map.addLayer({
+      id: 'scene-img-layer', type: 'raster', source: 'scene-img',
+      paint: { 'raster-opacity': +document.getElementById('ip-opacity').value / 100 },
+    }, 'perimeter-fill');   // keep imagery beneath vector overlays
+  }
+}
+
+function setImageryOpacity(v) {
+  if (map.getLayer('scene-img-layer'))
+    map.setPaintProperty('scene-img-layer', 'raster-opacity', +v / 100);
+}
+
+function togglePlay() {
+  if (playTimer) { stopPlay(); return; }
+  if (!imageryScenes.length) return;
+  document.getElementById('ip-play').textContent = '⏸';
+  playTimer = setInterval(() => {
+    if (imageryIdx >= imageryScenes.length - 1) { stopPlay(); return; }
+    stepScene(1);
+  }, 900);
+}
+
+function stopPlay() {
+  if (playTimer) { clearInterval(playTimer); playTimer = null; }
+  document.getElementById('ip-play').textContent = '▶';
+}
+
+// ── Pre/Post composite mosaic (per selected fire) ────────────────────────────
+function setMbActive(label) {
+  ['pre', 'post', 'swipe', 'off'].forEach(k =>
+    document.getElementById('mb-' + k).classList.toggle('active',
+      (label === null && k === 'off') || k === label));
+}
+
+async function showMosaic(label) {
+  if (!selectedFireId) return;
+  stopSwipe();
+  document.getElementById('mb-info').textContent = 'loading…';
+  let meta;
+  try {
+    meta = await fetch(`${API}/mosaics/${selectedFireId}__${label}.json?v=${ASSET_VER}`).then(r => {
+      if (!r.ok) throw new Error('none');
+      return r.json();
+    });
+  } catch (e) {
+    document.getElementById('mb-info').textContent = `no ${label}-fire mosaic for this fire`;
+    return;
+  }
+  const url = `${API || location.origin}/mosaics/${selectedFireId}__${label}.png?v=${ASSET_VER}`;
+  if (map.getSource('mosaic-img')) {
+    map.getSource('mosaic-img').updateImage({ url, coordinates: meta.coordinates });
+    map.setLayoutProperty('mosaic-img-layer', 'visibility', 'visible');
+  } else {
+    map.addSource('mosaic-img', { type: 'image', url, coordinates: meta.coordinates });
+    map.addLayer({ id: 'mosaic-img-layer', type: 'raster', source: 'mosaic-img',
+      paint: { 'raster-opacity': 1.0 } }, 'perimeter-fill');
+  }
+  setMbActive(label);
+  document.getElementById('mb-info').textContent =
+    `${label}: ${meta.window[0]} → ${meta.window[1]} · ${meta.n_tiles} tile(s)`;
+}
+
+function hideMosaic() {
+  if (map.getLayer('mosaic-img-layer')) map.setLayoutProperty('mosaic-img-layer', 'visibility', 'none');
+  stopSwipe();
+  setMbActive(null);
+  document.getElementById('mb-info').textContent = '';
+}
+
+// ── Pre/Post swipe ("sliding door") ─────────────────────────────────────────
+let swipeMeta = null;   // {pre, post} mosaic metadata
+let swipeX = 0;         // divider x, in map-container pixels
+
+async function startSwipe() {
+  if (!selectedFireId) return;
+  const info = document.getElementById('mb-info');
+  info.textContent = 'loading…';
+  const load = lbl => fetch(`${API}/mosaics/${selectedFireId}__${lbl}.json?v=${ASSET_VER}`)
+    .then(r => r.ok ? r.json() : null).catch(() => null);
+  const [pre, post] = await Promise.all([load('pre'), load('post')]);
+  if (!pre || !post) { info.textContent = 'need both pre & post mosaics for swipe'; return; }
+
+  if (map.getLayer('mosaic-img-layer'))
+    map.setLayoutProperty('mosaic-img-layer', 'visibility', 'none');
+  swipeMeta = { pre, post };
+  document.getElementById('swipe-pre').src  = `${API}/mosaics/${selectedFireId}__pre.png?v=${ASSET_VER}`;
+  document.getElementById('swipe-post').src = `${API}/mosaics/${selectedFireId}__post.png?v=${ASSET_VER}`;
+  document.getElementById('swipe').classList.add('active');
+  swipeX = map.getContainer().clientWidth / 2;
+  positionSwipe();
+  map.on('render', positionSwipe);
+  setMbActive('swipe');
+  info.textContent = 'drag the divider — left: pre · right: post';
+}
+
+function stopSwipe() {
+  if (!swipeMeta) return;
+  swipeMeta = null;
+  map.off('render', positionSwipe);
+  document.getElementById('swipe').classList.remove('active');
+}
+
+function _imgRect(coords) {            // coords: [NW, NE, SE, SW] of the image bbox
+  const nw = map.project(coords[0]);
+  const se = map.project(coords[2]);
+  return { left: nw.x, top: nw.y, w: se.x - nw.x, h: se.y - nw.y };
+}
+
+function positionSwipe() {
+  if (!swipeMeta) return;
+  const place = (id, coords) => {
+    const r = _imgRect(coords), el = document.getElementById(id);
+    el.style.left = r.left + 'px'; el.style.top = r.top + 'px';
+    el.style.width = r.w + 'px';  el.style.height = r.h + 'px';
+    return r;
+  };
+  place('swipe-pre', swipeMeta.pre.coordinates);
+  const pr = place('swipe-post', swipeMeta.post.coordinates);
+  // reveal the post image only to the RIGHT of the divider
+  const cut = Math.max(0, swipeX - pr.left);
+  document.getElementById('swipe-post').style.clipPath = `inset(0 0 0 ${cut}px)`;
+  const W = map.getContainer().clientWidth;
+  document.getElementById('swipe-handle').style.left = swipeX + 'px';
+  document.getElementById('swipe-tag-pre').style.left  = '10px';
+  document.getElementById('swipe-tag-post').style.right = '10px';
+  document.getElementById('swipe-tag-post').style.left  = 'auto';
+}
+
+(function initSwipeDrag() {
+  const handle = document.getElementById('swipe-handle');
+  if (!handle) return;
+  let dragging = false;
+  const xFromEvent = e => {
+    const rect = map.getContainer().getBoundingClientRect();
+    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    return Math.max(0, Math.min(rect.width, cx));
+  };
+  const move = e => { if (!dragging) return; swipeX = xFromEvent(e); positionSwipe(); e.preventDefault(); };
+  const up = () => { dragging = false; document.body.style.userSelect = ''; };
+  handle.addEventListener('mousedown', e => { dragging = true; document.body.style.userSelect = 'none'; e.preventDefault(); });
+  handle.addEventListener('touchstart', e => { dragging = true; }, { passive: true });
+  window.addEventListener('mousemove', move);
+  window.addEventListener('touchmove', move, { passive: false });
+  window.addEventListener('mouseup', up);
+  window.addEventListener('touchend', up);
+})();
+
+// ── Year view (all fires + imagery for a year at once) ───────────────────────
+const EMPTY_FC = { type: 'FeatureCollection', features: [] };
+let yearMode = false;
+let currentYear = null;
+let yearSceneCount = 0;
+let yearReq = 0;
+
+async function toggleYearView(cb) {
+  yearMode = cb.checked;
+  const sl = document.getElementById('year-slider');
+  if (yearMode) {
+    const yl = await fetch(`${API}/api/year/list`).then(r => r.json());
+    if (!yl.fire_years || !yl.fire_years.length) { setYearCount('no year data'); return; }
+    sl.min = yl.min; sl.max = yl.max; sl.step = 1; sl.disabled = false;
+    currentYear = yl.max; sl.value = currentYear;
+    loadYear(currentYear);
+  } else {
+    sl.disabled = true;
+    clearYearScenes();
+    map.getSource('perimeter').setData(EMPTY_FC);
+    map.getSource('buildings').setData(EMPTY_FC);
+    const vis = mtbsOn ? 'visible' : 'none';
+    map.setLayoutProperty('mtbs-fill', 'visibility', vis);
+    map.setLayoutProperty('mtbs-line', 'visibility', vis);
+    if (!mtbsOn) map.getSource('mtbs').setData(EMPTY_FC);
+    document.getElementById('year-label').textContent = '—';
+    setYearCount('');
+  }
+}
+
+function setYearCount(t) { document.getElementById('year-count').textContent = t; }
+function onYearSlider(v) { currentYear = +v; loadYear(currentYear); }
+
+async function loadYear(y) {
+  document.getElementById('year-label').textContent = y;
+  setYearCount('loading…');
+  const reqId = ++yearReq;
+
+  const [perims, bldgs] = await Promise.all([
+    fetch(`${API}/api/year/${y}/perimeters`).then(r => r.json()),
+    fetch(`${API}/api/year/${y}/buildings`).then(r => r.json()),
+  ]);
+  if (reqId !== yearReq) return;
+  map.getSource('perimeter').setData(perims);
+  map.getSource('buildings').setData(bldgs);
+
+  // MTBS historical fires for the year
+  fetch(`${API}/api/mtbs?year_min=${y}&year_max=${y}&simplify=0.005&limit=20000`)
+    .then(r => r.json()).then(fc => {
+      if (reqId !== yearReq) return;
+      map.getSource('mtbs').setData(fc);
+      map.setLayoutProperty('mtbs-fill', 'visibility', 'visible');
+      map.setLayoutProperty('mtbs-line', 'visibility', 'visible');
+    });
+
+  // One representative scene per fire
+  clearYearScenes();
+  const sd = await fetch(`${API}/api/year/${y}/scenes`).then(r => r.json());
+  if (reqId !== yearReq) return;
+  sd.scenes.forEach((s, i) => addYearScene(i, `${API || location.origin}${s.image_url}?v=${ASSET_VER}`, s.coordinates));
+
+  setYearCount(`${perims.features.length} fires · ${bldgs.features.length.toLocaleString()} buildings · ${sd.scenes.length} scenes`);
+  fitToFeatures(perims);
+}
+
+function addYearScene(i, url, coordinates) {
+  const sid = 'scene-yr-' + i;
+  map.addSource(sid, { type: 'image', url, coordinates });
+  map.addLayer({ id: sid + '-l', type: 'raster', source: sid,
+    paint: { 'raster-opacity': 0.9 } }, 'perimeter-fill');
+  yearSceneCount = Math.max(yearSceneCount, i + 1);
+}
+
+function clearYearScenes() {
+  for (let i = 0; i < yearSceneCount; i++) {
+    if (map.getLayer('scene-yr-' + i + '-l')) map.removeLayer('scene-yr-' + i + '-l');
+    if (map.getSource('scene-yr-' + i)) map.removeSource('scene-yr-' + i);
+  }
+  yearSceneCount = 0;
+}
+
+function fitToFeatures(fc) {
+  let minx = 180, miny = 90, maxx = -180, maxy = -90, any = false;
+  const scan = c => {
+    if (typeof c[0] === 'number') {
+      any = true;
+      minx = Math.min(minx, c[0]); maxx = Math.max(maxx, c[0]);
+      miny = Math.min(miny, c[1]); maxy = Math.max(maxy, c[1]);
+    } else c.forEach(scan);
+  };
+  fc.features.forEach(f => f.geometry && scan(f.geometry.coordinates));
+  if (any) map.fitBounds([[minx, miny], [maxx, maxy]], { padding: 60, duration: 800 });
+}
+
+// ── Footprints (viewport-loaded) ─────────────────────────────────────────────
+const FOOTPRINT_MIN_ZOOM = 13;
+let footprintReq = 0;
+
+async function loadFootprintsInView() {
+  const src = map.getSource('footprints');
+  if (!src) return;
+  if (map.getZoom() < FOOTPRINT_MIN_ZOOM) {
+    src.setData({ type: 'FeatureCollection', features: [] });
+    document.getElementById('footprint-hint').style.display = 'block';
+    return;
+  }
+  document.getElementById('footprint-hint').style.display = 'none';
+  const b = map.getBounds();
+  const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(v => v.toFixed(5)).join(',');
+  const reqId = ++footprintReq;
+  try {
+    const fc = await fetch(`${API}/api/footprints?bbox=${bbox}&limit=40000`).then(r => r.json());
+    if (reqId !== footprintReq) return;  // a newer move superseded this request
+    src.setData(fc);
+  } catch (e) { console.warn('Footprint load failed', e); }
+}
+
+// ── State ──────────────────────────────────────────────────────────────────
+let allFires = [];
+let selectedFireId = null;
+
+// ── Global stats ───────────────────────────────────────────────────────────
+async function loadGlobalStats() {
+  try {
+    const d = await fetch(`${API}/api/stats/global`).then(r => r.json());
+    document.getElementById('gs-fires').textContent     = d.n_fires.toLocaleString();
+    document.getElementById('gs-labels').textContent    = d.n_damage_labels.toLocaleString();
+    document.getElementById('gs-footprints').textContent = (d.n_footprints || 0).toLocaleString();
+    document.getElementById('gs-scenes').textContent    = d.n_image_scenes.toLocaleString();
+  } catch(e) { console.warn('Stats load failed', e); }
+}
+
+// ── Fire list ──────────────────────────────────────────────────────────────
+async function loadFires() {
+  const fires = await fetch(`${API}/api/fires`).then(r => r.json());
+  allFires = fires;
+  populateFilters(fires);
+  renderFireList(fires);
+}
+
+function populateFilters(fires) {
+  const states   = [...new Set(fires.map(f => f.state).filter(Boolean))].sort();
+  const years    = [...new Set(fires.map(f => f.year).filter(Boolean))].sort((a,b) => b-a);
+  const statuses = [...new Set(fires.map(f => f.status).filter(Boolean))].sort();
+  const sel = document.getElementById('filter-state');
+  sel.innerHTML = '<option value="">All states</option>'
+                + states.map(s => `<option value="${s}">${s}</option>`).join('');
+  const yel = document.getElementById('filter-year');
+  yel.innerHTML = '<option value="">All years</option>'
+                + years.map(y => `<option value="${y}">${y}</option>`).join('');
+  const stl = document.getElementById('filter-status');
+  stl.innerHTML = '<option value="">All status</option>'
+                + statuses.map(s => `<option value="${s}">${s}</option>`).join('');
+}
+
+function applyFilters() {
+  const state  = document.getElementById('filter-state').value;
+  const year   = document.getElementById('filter-year').value;
+  const status = document.getElementById('filter-status').value;
+  let fires = allFires;
+  if (state)  fires = fires.filter(f => f.state === state);
+  if (year)   fires = fires.filter(f => f.year == year);
+  if (status) fires = fires.filter(f => f.status === status);
+  renderFireList(fires);
+}
+
+function renderFireList(fires) {
+  const list = document.getElementById('fire-list');
+  list.innerHTML = '';
+  fires.forEach(f => {
+    const div = document.createElement('div');
+    div.className = 'fire-item' + (f.fire_id === selectedFireId ? ' active' : '');
+    div.innerHTML = `
+      <div class="fire-name">${f.name || f.fire_id}</div>
+      <div class="fire-meta">${f.state} · ${f.year}${f.ig_date ? ' · ' + f.ig_date : ''}</div>
+      <div class="fire-tags">
+        <span class="tag tag-status-${f.status}">${f.status}</span>
+        <span class="tag tag-pipeline">${f.pipeline}</span>
+        ${f.n_buildings ? `<span class="tag tag-pipeline">${f.n_buildings.toLocaleString()} bldg</span>` : ''}
+        ${f.n_scenes    ? `<span class="tag tag-pipeline">${f.n_scenes} scenes</span>` : ''}
+      </div>`;
+    div.onclick = () => selectFire(f);
+    list.appendChild(div);
+  });
+}
+
+// ── Fire selection ─────────────────────────────────────────────────────────
+async function selectFire(fire) {
+  selectedFireId = fire.fire_id;
+  applyFilters();   // re-render keeping the active state/year/status filter
+
+  // Fly to fire extent
+  if (fire.bbox_minx != null) {
+    map.fitBounds(
+      [[fire.bbox_minx, fire.bbox_miny], [fire.bbox_maxx, fire.bbox_maxy]],
+      { padding: 60, duration: 800 }
+    );
+  } else if (fire.centroid_lon != null) {
+    map.flyTo({ center: [fire.centroid_lon, fire.centroid_lat], zoom: 10 });
+  }
+
+  // Perimeter vs sub-clusters: dispersed fires show sub-clusters, NOT the big perimeter
+  if (dispersedFires.has(fire.fire_id)) {
+    map.getSource('perimeter').setData({ type: 'FeatureCollection', features: [] });
+    try {
+      const sc = await fetch(`${API}/api/analysis/${fire.fire_id}/subclusters`).then(r => r.json());
+      map.getSource('subclusters').setData(sc);
+    } catch(e) {
+      map.getSource('subclusters').setData({ type: 'FeatureCollection', features: [] });
+    }
+  } else {
+    map.getSource('subclusters').setData({ type: 'FeatureCollection', features: [] });
+    try {
+      const perim = await fetch(`${API}/api/fires/${fire.fire_id}/perimeter`).then(r => r.json());
+      map.getSource('perimeter').setData({ type: 'FeatureCollection', features: [perim] });
+    } catch(e) {
+      map.getSource('perimeter').setData({ type: 'FeatureCollection', features: [] });
+    }
+  }
+
+  // Load buildings
+  document.getElementById('loading-overlay').style.display = 'flex';
+  try {
+    const bldgs = await fetch(`${API}/api/fires/${fire.fire_id}/buildings`).then(r => r.json());
+    map.getSource('buildings').setData(bldgs);
+  } finally {
+    document.getElementById('loading-overlay').style.display = 'none';
+  }
+
+  // Load stats + show detail panel
+  loadFireDetail(fire);
+
+  // Load timeline
+  loadTimeline(fire);
+
+  // Refresh imagery scenes for the new fire if imagery is on
+  if (imageryOn) loadFireScenes(fire.fire_id);
+
+  // Reset + reveal the pre/post composite control for this fire
+  hideMosaic();
+  document.getElementById('mosaic-bar').classList.add('visible');
+
+  // Refresh self-made perimeter if that layer is on
+  if (selfPerimOn) loadSelfPerimeter(fire.fire_id);
+}
+
+// ── Detail panel ───────────────────────────────────────────────────────────
+async function loadFireDetail(fire) {
+  const panel = document.getElementById('detail-panel');
+  panel.classList.remove('hidden');
+  document.getElementById('detail-title').textContent = fire.name || fire.fire_id;
+
+  const body = document.getElementById('detail-body');
+  body.innerHTML = '<div style="color:#8b949e;font-size:12px">Loading...</div>';
+
+  const stats = await fetch(`${API}/api/stats/fire/${fire.fire_id}`).then(r => r.json());
+
+  let html = `
+    <div class="section-title">Overview</div>
+    <div class="source-row">
+      <span class="source-name">Buildings</span>
+      <span>${(stats.total_buildings||0).toLocaleString()}</span>
+    </div>
+    <div class="source-row">
+      <span class="source-name">Multi-source</span>
+      <span>${(stats.n_multi_source||0).toLocaleString()}</span>
+    </div>
+    ${stats.avg_agreement != null ? `
+    <div class="source-row">
+      <span class="source-name">Avg agreement</span>
+      <span>${(stats.avg_agreement*100).toFixed(1)}%</span>
+    </div>` : ''}
+    ${stats.n_high_disagreement ? `
+    <div class="source-row" style="border-color:#e74c3c">
+      <span style="color:#e74c3c">High disagreement</span>
+      <span>${stats.n_high_disagreement}</span>
+    </div>` : ''}
+
+    <div class="section-title">Canonical Distribution</div>
+  `;
+
+  const dist = stats.canonical_distribution || {};
+  const maxVal = Math.max(...Object.values(dist), 1);
+  DAMAGE_NAMES.forEach((name, i) => {
+    const cnt = dist[name] || 0;
+    const pct = (cnt / maxVal * 100).toFixed(0);
+    html += `
+      <div class="dmg-bar-row">
+        <div class="dmg-label">${name}</div>
+        <div class="dmg-bar-bg">
+          <div class="dmg-bar-fill" style="width:${pct}%;background:${DAMAGE_COLORS[i]}"></div>
+        </div>
+        <div class="dmg-count">${cnt.toLocaleString()}</div>
+      </div>`;
+  });
+
+  html += `<div class="section-title">Sources</div><div class="source-list">`;
+  const sources = stats.by_source || {};
+  Object.entries(sources).forEach(([src, counts]) => {
+    const total = Object.values(counts).reduce((a,b)=>a+b,0);
+    html += `<div class="source-row">
+      <span class="source-name">${src}</span>
+      <span>${total.toLocaleString()} bldg</span>
+    </div>`;
+  });
+  html += `</div>`;
+
+  html += `<div class="section-title">Coverage Analysis</div>
+           <div id="coverage-box" style="font-size:11px;color:#8b949e">computing…</div>`;
+  body.innerHTML = html;
+  loadCoverage(fire.fire_id);
+}
+
+// ── Self-made perimeter (buffered union of damage points) ────────────────────
+let selfPerimOn = false;
+
+function toggleSelfPerimeter(cb) {
+  selfPerimOn = cb.checked;
+  const vis = selfPerimOn ? 'visible' : 'none';
+  map.setLayoutProperty('self-perimeter-fill', 'visibility', vis);
+  map.setLayoutProperty('self-perimeter-line', 'visibility', vis);
+  if (selfPerimOn && selectedFireId) loadSelfPerimeter(selectedFireId);
+  else if (!selfPerimOn) map.getSource('self-perimeter').setData({ type: 'FeatureCollection', features: [] });
+}
+
+async function loadSelfPerimeter(fireId) {
+  const src = map.getSource('self-perimeter');
+  if (!src) return;
+  try {
+    const f = await fetch(`${API}/api/analysis/${fireId}/derived_perimeter`).then(r => {
+      if (!r.ok) throw new Error('none'); return r.json();
+    });
+    src.setData({ type: 'FeatureCollection', features: [f] });
+  } catch (e) {
+    src.setData({ type: 'FeatureCollection', features: [] });
+  }
+}
+
+// ── Coverage analysis (labels vs footprints vs perimeter) ────────────────────
+async function loadCoverage(fireId) {
+  const box = document.getElementById('coverage-box');
+  if (!box) return;
+  let d;
+  try {
+    const r = await fetch(`${API}/api/analysis/${fireId}`);
+    if (!r.ok) throw new Error('none');
+    d = await r.json();
+  } catch (e) {
+    box.innerHTML = '<span style="color:#8b949e">no footprint coverage data for this fire</span>';
+    return;
+  }
+  const pct = n => d.n_labelled_buildings ? (100 * n / d.n_labelled_buildings).toFixed(0) : 0;
+  const out = d.labels_outside_perimeter || { total: null, pct: null };
+
+  let html = `
+    <div class="source-row"><span class="source-name">Labelled buildings</span>
+      <span>${d.n_labelled_buildings.toLocaleString()}</span></div>`;
+
+  if (out.total != null) {
+    html += `<div class="source-row" style="border-left:2px solid #f1c40f">
+      <span style="color:#f1c40f">· outside official perimeter</span>
+      <span>${out.total.toLocaleString()} (${out.pct}%)</span></div>`;
+    if (out.damaged != null) {
+      html += `<div style="margin:4px 0 8px 10px;font-size:10px">
+        <span style="color:#e74c3c">damaged ${out.damaged.toLocaleString()}</span> ·
+        <span style="color:#2ecc71">no damage ${out.no_damage.toLocaleString()}</span>
+        ${out.unknown ? ` · <span>unknown ${out.unknown}</span>` : ''}
+      </div>`;
+    }
+  }
+
+  const lnf = d.labelled_no_footprint;
+  if (lnf) {
+    const framed = d.n_labelled_buildings - lnf.total;
+    const fpUnlabPct = d.n_footprints ? (100 * d.footprints_unlabelled / d.n_footprints).toFixed(0) : 0;
+    html += `
+    <div class="source-row"><span class="source-name">· with footprint</span>
+      <span>${framed.toLocaleString()} (${pct(framed)}%)</span></div>
+    <div class="source-row" style="border-left:2px solid #d29922">
+      <span style="color:#d29922">· labelled, NO footprint</span>
+      <span>${lnf.total.toLocaleString()} (${pct(lnf.total)}%)</span></div>
+    <div style="margin:4px 0 8px 10px;font-size:10px">
+      <span style="color:#e74c3c">damaged ${lnf.damaged.toLocaleString()}</span> ·
+      <span style="color:#2ecc71">no damage ${lnf.no_damage.toLocaleString()}</span>
+      ${lnf.unknown ? ` · <span>unknown ${lnf.unknown}</span>` : ''}
+    </div>
+    <div class="source-row"><span class="source-name">Footprints in perimeter</span>
+      <span>${d.n_footprints.toLocaleString()}</span></div>
+    <div class="source-row" style="border-left:2px solid #58a6ff">
+      <span style="color:#58a6ff">· footprint, NO label</span>
+      <span>${d.footprints_unlabelled.toLocaleString()} (${fpUnlabPct}%)</span></div>
+    <div style="margin-top:6px;font-size:10px;color:#8b949e">match radius ${d.match_radius_m} m</div>`;
+  } else {
+    html += `<div style="margin-top:6px;font-size:10px;color:#8b949e">no footprints downloaded for this fire</div>`;
+  }
+  box.innerHTML = html;
+}
+
+// ── Unified location lookup (spatial cross-layer join) ───────────────────────
+async function onMapClick(e) {
+  const { lng, lat } = e.lngLat;
+  const panel = document.getElementById('detail-panel');
+  panel.classList.remove('hidden');
+  document.getElementById('detail-title').textContent = 'Location';
+  const body = document.getElementById('detail-body');
+  body.innerHTML = '<div style="color:#8b949e;font-size:12px">Looking up…</div>';
+
+  let d;
+  try {
+    d = await fetch(`${API}/api/at?lon=${lng}&lat=${lat}&radius_m=60`).then(r => r.json());
+  } catch (err) {
+    body.innerHTML = '<div style="color:#e74c3c;font-size:12px">Lookup failed</div>';
+    return;
+  }
+
+  let html = `
+    <div class="section-title">Coordinates</div>
+    <div style="font-size:11px;color:#8b949e">${lat.toFixed(5)}, ${lng.toFixed(5)}</div>`;
+
+  // Damage-assessed building + its labels
+  if (d.building) {
+    const b = d.building;
+    const col = DAMAGE_COLORS[b.consensus_damage] || '#aaa';
+    const nm  = DAMAGE_NAMES[b.consensus_damage] || 'Unknown';
+    html += `<div class="section-title">Damage Building · ${b.dist_m} m</div>
+      <div class="source-row"><span class="source-name">Consensus</span>
+        <span style="color:${col};font-weight:600">${nm}</span></div>
+      <div class="source-row"><span class="source-name">Sources / labels</span>
+        <span>${b.n_sources} / ${b.n_assessments}</span></div>`;
+    if (b.merged && b.n_sources >= 2) {
+      html += `<div class="source-row"><span class="source-name">Footprint-merged</span>
+        <span style="color:${b.agree ? '#2ecc71' : '#e74c3c'};font-weight:600">
+          ${b.n_sources} sources · ${b.agree ? '✓ agree' : '✗ disagree'}</span></div>`;
+    }
+    b.labels.forEach(l => {
+      const c2 = DAMAGE_COLORS[l.damage_class] || '#aaa';
+      const n2 = DAMAGE_NAMES[l.damage_class] || 'Unknown';
+      html += `<div class="building-label-row">
+        <div class="building-source">${l.source_display_name || l.source}
+          <span class="source-type-${l.labeler_type}">[${l.labeler_type}]</span></div>
+        <div class="building-dmg"><span style="color:${c2};font-weight:600">${n2}</span>
+          ${l.damage_label && l.damage_label !== n2 ? ` <span style="color:#8b949e">(${l.damage_label})</span>` : ''}</div>
+        ${l.event_date ? `<div style="font-size:10px;color:#8b949e">${l.event_date}</div>` : ''}
+      </div>`;
+    });
+  }
+
+  // Building footprint(s) at this point
+  if (d.footprints && d.footprints.length) {
+    html += `<div class="section-title">Building Footprint</div>`;
+    d.footprints.forEach(f => {
+      const h = (f.height != null) ? `${Number(f.height).toFixed(1)} m` : '—';
+      html += `<div class="source-row"><span class="source-name">#${f.footprint_id} · ${f.source}</span><span>${h}</span></div>`;
+    });
+  }
+
+  // Research fire perimeter(s) containing the point
+  if (d.research_fires && d.research_fires.length) {
+    html += `<div class="section-title">Research Fire Perimeter</div>`;
+    d.research_fires.forEach(f => {
+      html += `<div class="source-row"><span class="source-name">${f.name || f.fire_id}</span><span>${f.year || ''}</span></div>`;
+    });
+  }
+
+  // MTBS historical fires containing the point
+  if (d.mtbs_fires && d.mtbs_fires.length) {
+    html += `<div class="section-title">Historical Fires (MTBS)</div>`;
+    d.mtbs_fires.forEach(f => {
+      const ac = f.acres ? `${Math.round(f.acres).toLocaleString()} ac` : '';
+      html += `<div class="source-row"><span class="source-name">${f.name} (${f.year})</span><span>${ac}</span></div>`;
+    });
+  }
+
+  // Imagery covering the point
+  html += `<div class="section-title">Imagery · ${d.scenes.n_total} scenes</div>`;
+  (d.scenes.recent || []).slice(0, 6).forEach(s => {
+    const dt = (s.acquired_at || '').slice(0, 10);
+    const cc = s.cloud_cover != null ? `${Math.round(s.cloud_cover * 100)}% cloud` : '';
+    html += `<div class="source-row"><span class="source-name">${dt}</span><span>${cc}</span></div>`;
+  });
+
+  if (!d.building && !d.footprints.length && !d.research_fires.length
+      && !d.mtbs_fires.length && !d.scenes.n_total) {
+    html += `<div style="margin-top:10px;color:#8b949e;font-size:12px">No data at this location.</div>`;
+  }
+
+  body.innerHTML = html;
+
+  // Auto-popup the image timeline for the most relevant fire
+  const fireId = (d.building && d.building.fire_id)
+              || (d.research_fires[0] && d.research_fires[0].fire_id);
+  if (fireId) {
+    const fire = allFires.find(f => f.fire_id === fireId) || { fire_id: fireId, name: fireId };
+    loadTimeline(fire);
+  }
+}
+
+// ── Timeline ───────────────────────────────────────────────────────────────
+async function loadTimeline(fire) {
+  const tl = document.getElementById('timeline');
+  try {
+    const months = await fetch(`${API}/api/scenes/timeline/${fire.fire_id}?max_cloud=1.0`).then(r => r.json());
+    if (!months.length) { tl.classList.remove('visible'); return; }
+
+    document.getElementById('tl-fire-name').textContent = fire.name;
+    const container = document.getElementById('timeline-months');
+    container.innerHTML = '';
+    months.forEach(m => {
+      const chip = document.createElement('div');
+      const cls = (m.min_days || 0) < 0 ? 'pre' : 'post';
+      chip.className = `month-chip ${cls}`;
+      chip.title = `${m.n_scenes} scenes, cloud: ${(m.avg_cloud*100).toFixed(0)}%`;
+      chip.textContent = m.month;
+      container.appendChild(chip);
+    });
+    tl.classList.add('visible');
+  } catch(e) {
+    tl.classList.remove('visible');
+  }
+}
+
+function closeDetail() {
+  document.getElementById('detail-panel').classList.add('hidden');
+}
+
+// ── Analysis dashboard ───────────────────────────────────────────────────────
+const AN_FACET = { m1_outside:'m1_outside_facet.png', m2_nofp:'m2_nofootprint_facet.png',
+                   m3_fp_nolabel:'m3_fp_nolabel_facet.png' };
+const AN_DESC = {
+  m1_outside:'Fraction of investigated point labels that fall OUTSIDE the fire perimeter. Fires with no official perimeter (self-drawn bbox) count as 100% outside.',
+  m2_nofp:'Fraction of labelled buildings whose point falls inside NO building-footprint polygon.',
+  m3_fp_nolabel:'Fraction of footprints inside the perimeter that carry NO damage label (real-perimeter fires only).'
+};
+const AN_ABBR = {'Alabama':'AL','Alaska':'AK','Arizona':'AZ','Arkansas':'AR','California':'CA','Colorado':'CO','Connecticut':'CT','Delaware':'DE','District of Columbia':'DC','Florida':'FL','Georgia':'GA','Hawaii':'HI','Idaho':'ID','Illinois':'IL','Indiana':'IN','Iowa':'IA','Kansas':'KS','Kentucky':'KY','Louisiana':'LA','Maine':'ME','Maryland':'MD','Massachusetts':'MA','Michigan':'MI','Minnesota':'MN','Mississippi':'MS','Missouri':'MO','Montana':'MT','Nebraska':'NE','Nevada':'NV','New Hampshire':'NH','New Jersey':'NJ','New Mexico':'NM','New York':'NY','North Carolina':'NC','North Dakota':'ND','Ohio':'OH','Oklahoma':'OK','Oregon':'OR','Pennsylvania':'PA','Rhode Island':'RI','South Carolina':'SC','South Dakota':'SD','Tennessee':'TN','Texas':'TX','Utah':'UT','Vermont':'VT','Virginia':'VA','Washington':'WA','West Virginia':'WV','Wisconsin':'WI','Wyoming':'WY'};
+let anData = null, anMap = null, anMetric = 'm1_outside', anYearIdx = -1, anStates = null;
+let anSelCode = null, anSelName = null;
+
+async function openAnalysis() {
+  document.getElementById('analysis-view').classList.add('active');
+  if (!anData) {
+    anData = await fetch(`${API}/api/analytics/state_year`).then(r => r.json());
+    const sl = document.getElementById('an-year');
+    sl.max = anData.years.length - 1; sl.value = anData.years.length - 1;
+  }
+  if (!anMap) initAnMap(); else { anMap.resize(); anRender(); }
+}
+function closeAnalysis() { document.getElementById('analysis-view').classList.remove('active'); }
+
+function initAnMap() {
+  anMap = new maplibregl.Map({ container: 'an-map',
+    style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+    center: [-96, 38], zoom: 3.1, attributionControl: false });
+  anMap.on('load', async () => {
+    anStates = await fetch(`${API}/api/analytics/states_geojson`).then(r => r.json());
+    anStates.features = anStates.features.filter(
+      f => !['Alaska', 'Hawaii', 'Puerto Rico'].includes(f.properties.name));
+    anMap.addSource('an-states', { type: 'geojson', data: anStates });
+    anMap.addLayer({ id: 'an-states-fill', type: 'fill', source: 'an-states', paint: {
+      'fill-color': ['case', ['<', ['get', 'val'], 0], '#2a2a2a',
+        ['interpolate', ['linear'], ['get', 'val'],
+         0, '#440154', 0.25, '#3b528b', 0.5, '#21918c', 0.75, '#5ec962', 1, '#fde725']],
+      'fill-opacity': 0.85 }});
+    anMap.addLayer({ id: 'an-states-line', type: 'line', source: 'an-states',
+      paint: { 'line-color': '#0d1117', 'line-width': 0.6 }});
+    const tip = document.getElementById('an-tip');
+    anMap.addLayer({ id: 'an-states-sel', type: 'line', source: 'an-states',
+      paint: { 'line-color': '#fde725', 'line-width': 2.2 },
+      filter: ['==', ['get', 'name'], '___none___'] });
+    anMap.on('mousemove', 'an-states-fill', e => {
+      const f = e.features[0], v = f.properties.val;
+      tip.style.display = 'block'; tip.style.left = (e.point.x + 14) + 'px';
+      tip.style.top = (e.point.y + 14) + 'px';
+      tip.innerHTML = `<b>${f.properties.name}</b><br>${v < 0 ? 'no data' : (v * 100).toFixed(1) + '%'}`;
+    });
+    anMap.on('mouseleave', 'an-states-fill', () => { tip.style.display = 'none'; });
+    anMap.on('click', 'an-states-fill', e => {
+      const name = e.features[0].properties.name;
+      anSelName = name; anSelCode = AN_ABBR[name];
+      anMap.setFilter('an-states-sel', ['==', ['get', 'name'], name]);
+      anStateChart();
+    });
+    anMap.getCanvas().style.cursor = 'pointer';
+    anRender();
+  });
+}
+
+function anStateChart() {
+  const t = document.getElementById('an-state-title');
+  if (!anSelCode) { t.textContent = 'Click a state on the map to see its yearly trend';
+    document.getElementById('an-state-chart').innerHTML = ''; return; }
+  const m = anData.metrics[anMetric];
+  const series = m.state_year[anSelCode] || {};
+  const yr = anYearIdx >= 0 ? String(anData.years[anYearIdx]) : null;
+  t.innerHTML = `${anSelName} (${anSelCode}) — ${m.label}`;
+  drawSeries('an-state-chart', series, yr, '#f78166');
+}
+
+function anSetMetric(m) {
+  anMetric = m;
+  document.querySelectorAll('.an-metric-btn[data-m]').forEach(b =>
+    b.classList.toggle('active', b.dataset.m === m));
+  anRender();
+}
+function anSetYearIdx(i) {
+  anYearIdx = +i;
+  document.getElementById('an-allyears').classList.remove('active');
+  document.getElementById('an-year-label').textContent = anData.years[anYearIdx];
+  anRender();
+}
+function anAllYears() {
+  anYearIdx = -1;
+  document.getElementById('an-allyears').classList.add('active');
+  document.getElementById('an-year-label').textContent = 'All years';
+  anRender();
+}
+
+function anRender() {
+  if (!anData || !anMap || !anMap.getSource('an-states')) return;
+  const m = anData.metrics[anMetric];
+  const yr = anYearIdx >= 0 ? String(anData.years[anYearIdx]) : null;
+  const lut = {};
+  if (yr) { for (const [code, ys] of Object.entries(m.state_year)) if (ys[yr] != null) lut[code] = ys[yr]; }
+  else Object.assign(lut, m.state_all);
+  anStates.features.forEach(f => {
+    const v = lut[AN_ABBR[f.properties.name]];
+    f.properties.val = (v == null ? -1 : v);
+  });
+  anMap.getSource('an-states').setData(anStates);
+  document.getElementById('an-legend-title').textContent = m.label + (yr ? ` · ${yr}` : ' · all years');
+  document.getElementById('an-desc').textContent = AN_DESC[anMetric];
+  drawSeries('an-chart', m.national, yr, '#58a6ff');
+  anStateChart();
+}
+
+function drawSeries(elId, series, selYr, color) {
+  const el = document.getElementById(elId);
+  const years = anData.years;
+  if (!series || !Object.keys(series).length) { el.innerHTML = '<div style="color:#8b949e;font-size:11px;padding:6px">no data</div>'; return; }
+  const W = 440, H = 200, L = 40, B = 24, T = 8;
+  const xs = i => L + (W - L - 10) * (years.length > 1 ? i / (years.length - 1) : 0);
+  const ys = v => (H - B) - (H - B - T) * v;
+  let grid = '', dots = '', pts = [];
+  [0, 0.5, 1].forEach(t => { grid += `<line x1="${L}" y1="${ys(t)}" x2="${W - 10}" y2="${ys(t)}" stroke="#21262d"/>` +
+    `<text x="4" y="${ys(t) + 3}" fill="#8b949e" font-size="9">${t * 100}%</text>`; });
+  years.forEach((yr, i) => { if (yr % 5 === 0) grid += `<text x="${xs(i) - 10}" y="${H - 7}" fill="#8b949e" font-size="9">${yr}</text>`; });
+  years.forEach((yr, i) => {
+    const v = series[String(yr)]; if (v == null) return;
+    const px = xs(i), py = ys(v); pts.push(`${px},${py}`);
+    const sel = String(yr) === selYr;
+    dots += `<circle cx="${px}" cy="${py}" r="${sel ? 4.5 : 2.3}" fill="${sel ? '#fde725' : color}"/>`;
+  });
+  const line = `<polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="2"/>`;
+  el.innerHTML = `<svg width="${W}" height="${H}">${grid}${line}${dots}</svg>`;
+}
+</script>
+</body>
+</html>
