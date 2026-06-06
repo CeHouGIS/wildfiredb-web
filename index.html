@@ -387,6 +387,9 @@
     <button class="an-metric-btn active" data-m="m1_outside" onclick="anSetMetric('m1_outside')">1 · Outside perimeter</button>
     <button class="an-metric-btn" data-m="m2_nofp" onclick="anSetMetric('m2_nofp')">2 · No footprint</button>
     <button class="an-metric-btn" data-m="m3_fp_nolabel" onclick="anSetMetric('m3_fp_nolabel')">3 · Footprint unlabelled</button>
+    <span style="width:1px;height:22px;background:#30363d;margin:0 2px"></span>
+    <button class="an-metric-btn active" data-mode="state" onclick="anSetMode('state')">▦ State</button>
+    <button class="an-metric-btn" data-mode="grid" onclick="anSetMode('grid')">▩ Grid</button>
     <div id="an-year-wrap">
       <span id="an-year-label">All years</span>
       <input type="range" id="an-year" min="0" max="0" value="0" oninput="anSetYearIdx(this.value)">
@@ -1323,8 +1326,15 @@ const AN_DESC = {
   m3_fp_nolabel:'Fraction of footprints inside the perimeter that carry NO damage label (real-perimeter fires only).'
 };
 const AN_ABBR = {'Alabama':'AL','Alaska':'AK','Arizona':'AZ','Arkansas':'AR','California':'CA','Colorado':'CO','Connecticut':'CT','Delaware':'DE','District of Columbia':'DC','Florida':'FL','Georgia':'GA','Hawaii':'HI','Idaho':'ID','Illinois':'IL','Indiana':'IN','Iowa':'IA','Kansas':'KS','Kentucky':'KY','Louisiana':'LA','Maine':'ME','Maryland':'MD','Massachusetts':'MA','Michigan':'MI','Minnesota':'MN','Mississippi':'MS','Missouri':'MO','Montana':'MT','Nebraska':'NE','Nevada':'NV','New Hampshire':'NH','New Jersey':'NJ','New Mexico':'NM','New York':'NY','North Carolina':'NC','North Dakota':'ND','Ohio':'OH','Oklahoma':'OK','Oregon':'OR','Pennsylvania':'PA','Rhode Island':'RI','South Carolina':'SC','South Dakota':'SD','Tennessee':'TN','Texas':'TX','Utah':'UT','Vermont':'VT','Virginia':'VA','Washington':'WA','West Virginia':'WV','Wisconsin':'WI','Wyoming':'WY'};
-let anData = null, anMap = null, anMetric = 'm1_outside', anYearIdx = -1, anStates = null;
-let anSelCode = null, anSelName = null;
+const FILL_RAMP = ['case', ['<', ['get', 'val'], 0], '#2a2a2a',
+  ['interpolate', ['linear'], ['get', 'val'],
+   0, '#440154', 0.25, '#3b528b', 0.5, '#21918c', 0.75, '#5ec962', 1, '#fde725']];
+let anData = null, anGrid = null, anGridGeo = null, anStates = null;
+let anMap = null, anMetric = 'm1_outside', anYearIdx = -1, anMode = 'state';
+let anSelKey = null, anSelLabel = null, anGridReady = false;
+
+function curData() { return anMode === 'grid' ? anGrid : anData; }
+function featKey(f) { return anMode === 'grid' ? f.properties.cell_id : AN_ABBR[f.properties.name]; }
 
 async function openAnalysis() {
   document.getElementById('analysis-view').classList.add('active');
@@ -1337,6 +1347,24 @@ async function openAnalysis() {
 }
 function closeAnalysis() { document.getElementById('analysis-view').classList.remove('active'); }
 
+function anHover(e) {
+  const tip = document.getElementById('an-tip'), f = e.features[0], v = f.properties.val;
+  const name = anMode === 'grid' ? `cell ${f.properties.cell_id}` : f.properties.name;
+  tip.style.display = 'block'; tip.style.left = (e.point.x + 14) + 'px'; tip.style.top = (e.point.y + 14) + 'px';
+  tip.innerHTML = `<b>${name}</b><br>${v < 0 ? 'no data' : (v * 100).toFixed(1) + '%'}`;
+}
+function anClick(e) {
+  const f = e.features[0];
+  if (anMode === 'grid') {
+    anSelKey = f.properties.cell_id; anSelLabel = `Grid cell ${anSelKey}`;
+    anMap.setFilter('an-grid-sel', ['==', ['get', 'cell_id'], anSelKey]);
+  } else {
+    anSelKey = AN_ABBR[f.properties.name]; anSelLabel = `${f.properties.name} (${anSelKey})`;
+    anMap.setFilter('an-states-sel', ['==', ['get', 'name'], f.properties.name]);
+  }
+  anKeyChart();
+}
+
 function initAnMap() {
   anMap = new maplibregl.Map({ container: 'an-map',
     style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
@@ -1346,44 +1374,62 @@ function initAnMap() {
     anStates.features = anStates.features.filter(
       f => !['Alaska', 'Hawaii', 'Puerto Rico'].includes(f.properties.name));
     anMap.addSource('an-states', { type: 'geojson', data: anStates });
-    anMap.addLayer({ id: 'an-states-fill', type: 'fill', source: 'an-states', paint: {
-      'fill-color': ['case', ['<', ['get', 'val'], 0], '#2a2a2a',
-        ['interpolate', ['linear'], ['get', 'val'],
-         0, '#440154', 0.25, '#3b528b', 0.5, '#21918c', 0.75, '#5ec962', 1, '#fde725']],
-      'fill-opacity': 0.85 }});
+    anMap.addLayer({ id: 'an-states-fill', type: 'fill', source: 'an-states',
+      paint: { 'fill-color': FILL_RAMP, 'fill-opacity': 0.85 }});
     anMap.addLayer({ id: 'an-states-line', type: 'line', source: 'an-states',
       paint: { 'line-color': '#0d1117', 'line-width': 0.6 }});
-    const tip = document.getElementById('an-tip');
     anMap.addLayer({ id: 'an-states-sel', type: 'line', source: 'an-states',
-      paint: { 'line-color': '#fde725', 'line-width': 2.2 },
-      filter: ['==', ['get', 'name'], '___none___'] });
-    anMap.on('mousemove', 'an-states-fill', e => {
-      const f = e.features[0], v = f.properties.val;
-      tip.style.display = 'block'; tip.style.left = (e.point.x + 14) + 'px';
-      tip.style.top = (e.point.y + 14) + 'px';
-      tip.innerHTML = `<b>${f.properties.name}</b><br>${v < 0 ? 'no data' : (v * 100).toFixed(1) + '%'}`;
-    });
-    anMap.on('mouseleave', 'an-states-fill', () => { tip.style.display = 'none'; });
-    anMap.on('click', 'an-states-fill', e => {
-      const name = e.features[0].properties.name;
-      anSelName = name; anSelCode = AN_ABBR[name];
-      anMap.setFilter('an-states-sel', ['==', ['get', 'name'], name]);
-      anStateChart();
-    });
+      paint: { 'line-color': '#fde725', 'line-width': 2.2 }, filter: ['==', ['get', 'name'], '__none__'] });
+    anMap.on('mousemove', 'an-states-fill', anHover);
+    anMap.on('mouseleave', 'an-states-fill', () => { document.getElementById('an-tip').style.display = 'none'; });
+    anMap.on('click', 'an-states-fill', anClick);
     anMap.getCanvas().style.cursor = 'pointer';
     anRender();
   });
 }
 
-function anStateChart() {
+async function ensureGrid() {
+  if (anGridReady) return;
+  [anGrid, anGridGeo] = await Promise.all([
+    fetch(`${API}/api/analytics/grid_year`).then(r => r.json()),
+    fetch(`${API}/api/analytics/grid_geojson`).then(r => r.json()),
+  ]);
+  anMap.addSource('an-grid', { type: 'geojson', data: anGridGeo });
+  anMap.addLayer({ id: 'an-grid-fill', type: 'fill', source: 'an-grid',
+    layout: { visibility: 'none' }, paint: { 'fill-color': FILL_RAMP, 'fill-opacity': 0.8 }});
+  anMap.addLayer({ id: 'an-grid-line', type: 'line', source: 'an-grid',
+    layout: { visibility: 'none' }, paint: { 'line-color': '#0d1117', 'line-width': 0.3 }});
+  anMap.addLayer({ id: 'an-grid-sel', type: 'line', source: 'an-grid',
+    layout: { visibility: 'none' }, paint: { 'line-color': '#fde725', 'line-width': 2 },
+    filter: ['==', ['get', 'cell_id'], '__none__'] });
+  anMap.on('mousemove', 'an-grid-fill', anHover);
+  anMap.on('mouseleave', 'an-grid-fill', () => { document.getElementById('an-tip').style.display = 'none'; });
+  anMap.on('click', 'an-grid-fill', anClick);
+  anGridReady = true;
+}
+
+async function anSetMode(mode) {
+  if (mode === 'grid') await ensureGrid();
+  anMode = mode;
+  anSelKey = null; anSelLabel = null;
+  document.querySelectorAll('.an-metric-btn[data-mode]').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === mode));
+  const on = id => anMap.setLayoutProperty(id, 'visibility', 'visible');
+  const off = id => anMap.setLayoutProperty(id, 'visibility', 'none');
+  ['an-states-fill', 'an-states-line', 'an-states-sel'].forEach(mode === 'state' ? on : off);
+  if (anGridReady) ['an-grid-fill', 'an-grid-line', 'an-grid-sel'].forEach(mode === 'grid' ? on : off);
+  anRender();
+}
+
+function anKeyChart() {
   const t = document.getElementById('an-state-title');
-  if (!anSelCode) { t.textContent = 'Click a state on the map to see its yearly trend';
-    document.getElementById('an-state-chart').innerHTML = ''; return; }
-  const m = anData.metrics[anMetric];
-  const series = m.state_year[anSelCode] || {};
-  const yr = anYearIdx >= 0 ? String(anData.years[anYearIdx]) : null;
-  t.innerHTML = `${anSelName} (${anSelCode}) — ${m.label}`;
-  drawSeries('an-state-chart', series, yr, '#f78166');
+  const hint = anMode === 'grid' ? 'Click a grid cell on the map to see its yearly trend'
+                                 : 'Click a state on the map to see its yearly trend';
+  if (!anSelKey) { t.textContent = hint; document.getElementById('an-state-chart').innerHTML = ''; return; }
+  const m = curData().metrics[anMetric];
+  const yr = anYearIdx >= 0 ? String(curData().years[anYearIdx]) : null;
+  t.innerHTML = `${anSelLabel} — ${m.label}`;
+  drawSeries('an-state-chart', (m.key_year[anSelKey] || {}), yr, '#f78166');
 }
 
 function anSetMetric(m) {
@@ -1406,26 +1452,26 @@ function anAllYears() {
 }
 
 function anRender() {
-  if (!anData || !anMap || !anMap.getSource('an-states')) return;
-  const m = anData.metrics[anMetric];
-  const yr = anYearIdx >= 0 ? String(anData.years[anYearIdx]) : null;
+  if (!anMap || !anMap.getSource('an-states')) return;
+  const D = curData(), m = D.metrics[anMetric];
+  const yr = anYearIdx >= 0 ? String(D.years[anYearIdx]) : null;
   const lut = {};
-  if (yr) { for (const [code, ys] of Object.entries(m.state_year)) if (ys[yr] != null) lut[code] = ys[yr]; }
-  else Object.assign(lut, m.state_all);
-  anStates.features.forEach(f => {
-    const v = lut[AN_ABBR[f.properties.name]];
-    f.properties.val = (v == null ? -1 : v);
-  });
-  anMap.getSource('an-states').setData(anStates);
-  document.getElementById('an-legend-title').textContent = m.label + (yr ? ` · ${yr}` : ' · all years');
+  if (yr) { for (const [k, ys] of Object.entries(m.key_year)) if (ys[yr] != null) lut[k] = ys[yr]; }
+  else Object.assign(lut, m.key_all);
+  const geo = anMode === 'grid' ? anGridGeo : anStates;
+  const srcId = anMode === 'grid' ? 'an-grid' : 'an-states';
+  geo.features.forEach(f => { const v = lut[featKey(f)]; f.properties.val = (v == null ? -1 : v); });
+  anMap.getSource(srcId).setData(geo);
+  document.getElementById('an-legend-title').textContent =
+    m.label + (anMode === 'grid' ? ' · grid' : '') + (yr ? ` · ${yr}` : ' · all years');
   document.getElementById('an-desc').textContent = AN_DESC[anMetric];
   drawSeries('an-chart', m.national, yr, '#58a6ff');
-  anStateChart();
+  anKeyChart();
 }
 
 function drawSeries(elId, series, selYr, color) {
   const el = document.getElementById(elId);
-  const years = anData.years;
+  const years = curData().years;
   if (!series || !Object.keys(series).length) { el.innerHTML = '<div style="color:#8b949e;font-size:11px;padding:6px">no data</div>'; return; }
   const W = 440, H = 200, L = 40, B = 24, T = 8;
   const xs = i => L + (W - L - 10) * (years.length > 1 ? i / (years.length - 1) : 0);
