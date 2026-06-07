@@ -223,8 +223,9 @@
   #analysis-view { position: fixed; inset: 0; background: #0d1117; z-index: 300;
     display: none; flex-direction: column; color: #c9d1d9; }
   #analysis-view.active { display: flex; }
-  #an-header { display: flex; align-items: center; gap: 14px; padding: 10px 16px;
-    border-bottom: 1px solid #30363d; flex-wrap: wrap; }
+  #an-header { display: flex; flex-direction: column; gap: 8px; padding: 10px 16px;
+    border-bottom: 1px solid #30363d; }
+  .an-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   #an-header h2 { font-size: 16px; color: #58a6ff; margin-right: 6px; }
   #an-back { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px;
     padding: 6px 12px; cursor: pointer; font-size: 12px; }
@@ -383,19 +384,23 @@
 <!-- Analysis dashboard (full-page overlay) -->
 <div id="analysis-view">
   <div id="an-header">
-    <h2>Coverage Analysis</h2>
-    <button class="an-metric-btn active" data-m="m1_outside" onclick="anSetMetric('m1_outside')">1 · Outside perimeter</button>
-    <button class="an-metric-btn" data-m="m2_nofp" onclick="anSetMetric('m2_nofp')">2 · No footprint</button>
-    <button class="an-metric-btn" data-m="m3_fp_nolabel" onclick="anSetMetric('m3_fp_nolabel')">3 · Footprint unlabelled</button>
-    <span style="width:1px;height:22px;background:#30363d;margin:0 2px"></span>
-    <button class="an-metric-btn active" data-mode="state" onclick="anSetMode('state')">▦ State</button>
-    <button class="an-metric-btn" data-mode="grid" onclick="anSetMode('grid')">▩ Grid</button>
-    <div id="an-year-wrap">
-      <span id="an-year-label">All years</span>
-      <input type="range" id="an-year" min="0" max="0" value="0" oninput="anSetYearIdx(this.value)">
-      <button class="an-metric-btn" id="an-allyears" onclick="anAllYears()">All</button>
+    <div class="an-row">
+      <h2>Coverage Analysis</h2>
+      <button class="an-metric-btn active" data-m="m1_outside" onclick="anSetMetric('m1_outside')">1 · Outside perimeter</button>
+      <button class="an-metric-btn" data-m="m2_nofp" onclick="anSetMetric('m2_nofp')">2 · No footprint</button>
+      <button class="an-metric-btn" data-m="m3_fp_nolabel" onclick="anSetMetric('m3_fp_nolabel')">3 · Footprint unlabelled</button>
+      <div id="an-year-wrap">
+        <span id="an-year-label">All years</span>
+        <input type="range" id="an-year" min="0" max="0" value="0" oninput="anSetYearIdx(this.value)">
+        <button class="an-metric-btn" id="an-allyears" onclick="anAllYears()">All</button>
+      </div>
+      <button id="an-back" onclick="closeAnalysis()">✕ Back to map</button>
     </div>
-    <button id="an-back" onclick="closeAnalysis()">✕ Back to map</button>
+    <div class="an-row">
+      <span style="color:#8b949e;font-size:12px">Aggregate by:</span>
+      <button class="an-metric-btn active" data-mode="state" onclick="anSetMode('state')">▦ State</button>
+      <button class="an-metric-btn" data-mode="grid" onclick="anSetMode('grid')">▩ Grid</button>
+    </div>
   </div>
   <div id="an-body">
     <div id="an-map">
