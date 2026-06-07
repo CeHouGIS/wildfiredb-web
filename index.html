@@ -708,8 +708,10 @@ async function showMosaic(label) {
       paint: { 'raster-opacity': 1.0 } }, 'perimeter-fill');
   }
   setMbActive(label);
+  const cov = Math.round((meta.cloudfree_coverage || 0) * 100);
+  const lowWarn = cov < 15 ? '  ⚠ mostly cloud/gap' : '';
   document.getElementById('mb-info').textContent =
-    `${label}: ${meta.window[0]} → ${meta.window[1]} · ${meta.n_tiles} tile(s)`;
+    `${label}: ${meta.window[0]} → ${meta.window[1]} · ${meta.n_scenes_used} scene(s) · ${cov}% filled${lowWarn}`;
 }
 
 function hideMosaic() {
@@ -742,7 +744,12 @@ async function startSwipe() {
   positionSwipe();
   map.on('render', positionSwipe);
   setMbActive('swipe');
-  info.textContent = 'drag the divider — left: pre · right: post';
+  const pc = Math.round((pre.cloudfree_coverage || 0) * 100);
+  const oc = Math.round((post.cloudfree_coverage || 0) * 100);
+  const warn = (pc < 15 || oc < 15)
+    ? `  ⚠ sparse mosaic (pre ${pc}% / post ${oc}% filled) — may look similar`
+    : `  (pre ${pc}% / post ${oc}% filled)`;
+  info.textContent = `drag — left: pre · right: post${warn}`;
 }
 
 function stopSwipe() {
