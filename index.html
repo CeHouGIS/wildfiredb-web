@@ -252,6 +252,24 @@
   #an-tip { position: absolute; pointer-events: none; background: rgba(13,17,23,.92);
     border: 1px solid #30363d; border-radius: 5px; padding: 4px 8px; font-size: 11px;
     z-index: 6; display: none; }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.4; transform: scale(0.8); }
+  }
+  @keyframes flash-green {
+    0%   { background: #1f6b3a; }
+    100% { background: transparent; }
+  }
+  .live-pulse { animation: pulse-dot 1.4s ease-in-out infinite; }
+  .tag-downloading {
+    background: #1a3a5c; border: 1px solid #2d6a9f;
+    color: #58a6ff; font-size: 10px; border-radius: 10px;
+    padding: 1px 7px; display: inline-flex; align-items: center; gap: 3px;
+  }
+  .tag-downloading::before {
+    content: '↓'; animation: pulse-dot 1s ease-in-out infinite;
+  }
+  .scene-updated { animation: flash-green 1.2s ease-out; }
 </style>
 </head>
 <body>
@@ -267,6 +285,10 @@
       <div class="stat-chip">Labels: <span id="gs-labels">—</span></div>
       <div class="stat-chip">Footprints: <span id="gs-footprints">—</span></div>
       <div class="stat-chip">Scenes: <span id="gs-scenes">—</span></div>
+      <div class="stat-chip" id="live-chip" title="Auto-refreshes every 2 min">
+        <span id="live-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#2ecc71;margin-right:4px;vertical-align:middle"></span>
+        <span id="live-label" style="color:#8b949e">Live</span>
+      </div>
     </div>
   </div>
   <div id="filters">
@@ -523,6 +545,11 @@ map.on('load', () => {
   loadGlobalStats();
   loadFires();
   loadDispersedList();
+
+  // Auto-refresh every 2 minutes — picks up newly downloaded imagery
+  setInterval(async () => {
+    await liveRefresh();
+  }, 120_000);
 });
 
 // fire_ids that were split into sub-clusters (dispersed fires)
@@ -926,13 +953,23 @@ let allFires = [];
 let selectedFireId = null;
 
 // ── Global stats ───────────────────────────────────────────────────────────
+let _prevSceneCount = 0;
 async function loadGlobalStats() {
   try {
     const d = await fetch(`${API}/api/stats/global`).then(r => r.json());
-    document.getElementById('gs-fires').textContent     = d.n_fires.toLocaleString();
-    document.getElementById('gs-labels').textContent    = d.n_damage_labels.toLocaleString();
+    document.getElementById('gs-fires').textContent      = d.n_fires.toLocaleString();
+    document.getElementById('gs-labels').textContent     = d.n_damage_labels.toLocaleString();
     document.getElementById('gs-footprints').textContent = (d.n_footprints || 0).toLocaleString();
-    document.getElementById('gs-scenes').textContent    = d.n_image_scenes.toLocaleString();
+    const scEl = document.getElementById('gs-scenes');
+    const newCount = d.n_image_scenes;
+    if (_prevSceneCount && newCount > _prevSceneCount) {
+      scEl.textContent = newCount.toLocaleString();
+      scEl.classList.add('scene-updated');
+      setTimeout(() => scEl.classList.remove('scene-updated'), 1200);
+    } else {
+      scEl.textContent = newCount.toLocaleString();
+    }
+    _prevSceneCount = newCount;
   } catch(e) { console.warn('Stats load failed', e); }
 }
 
@@ -942,6 +979,47 @@ async function loadFires() {
   allFires = fires;
   populateFilters(fires);
   renderFireList(fires);
+}
+
+// ── Live refresh (polling) ─────────────────────────────────────────────────
+let _diskCounts = {};  // fire_id → on-disk tif count (from /api/imagery/disk_scan)
+async function liveRefresh() {
+  const dot   = document.getElementById('live-dot');
+  const label = document.getElementById('live-label');
+  if (!dot) return;
+  dot.classList.add('live-pulse');
+  label.textContent = 'Syncing…';
+  label.style.color = '#58a6ff';
+  try {
+    // fetch disk counts to detect in-progress downloads
+    try {
+      const dc = await fetch(`${API}/api/scenes/disk_scan`).then(r => r.json());
+      _diskCounts = dc;
+    } catch(_) {}
+
+    const [fires, ] = await Promise.all([
+      fetch(`${API}/api/fires`).then(r => r.json()),
+      loadGlobalStats(),
+    ]);
+    // detect changes vs current allFires
+    const prevMap = Object.fromEntries((allFires || []).map(f => [f.fire_id, f.n_scenes]));
+    allFires = fires;
+    const changed = fires.filter(f => (f.n_scenes || 0) !== (prevMap[f.fire_id] || 0));
+    applyFilters();
+    if (changed.length) {
+      changed.forEach(f => {
+        const el = document.querySelector(`[data-fire-id="${f.fire_id}"] .scenes-tag`);
+        if (el) { el.classList.add('scene-updated'); setTimeout(() => el.classList.remove('scene-updated'), 1200); }
+      });
+    }
+    label.textContent = 'Live';
+    label.style.color = '#2ecc71';
+  } catch(e) {
+    label.textContent = 'Offline';
+    label.style.color = '#e74c3c';
+  } finally {
+    dot.classList.remove('live-pulse');
+  }
 }
 
 function populateFilters(fires) {
@@ -976,6 +1054,10 @@ function renderFireList(fires) {
   fires.forEach(f => {
     const div = document.createElement('div');
     div.className = 'fire-item' + (f.fire_id === selectedFireId ? ' active' : '');
+    div.dataset.fireId = f.fire_id;
+    const diskN   = _diskCounts[f.fire_id] || 0;
+    const indexed = f.n_scenes || 0;
+    const pending = Math.max(0, diskN - indexed);
     div.innerHTML = `
       <div class="fire-name">${f.name || f.fire_id}</div>
       <div class="fire-meta">${f.state} · ${f.year}${f.ig_date ? ' · ' + f.ig_date : ''}</div>
@@ -983,7 +1065,8 @@ function renderFireList(fires) {
         <span class="tag tag-status-${f.status}">${f.status}</span>
         <span class="tag tag-pipeline">${f.pipeline}</span>
         ${f.n_buildings ? `<span class="tag tag-pipeline">${f.n_buildings.toLocaleString()} bldg</span>` : ''}
-        ${f.n_scenes    ? `<span class="tag tag-pipeline">${f.n_scenes} scenes</span>` : ''}
+        ${indexed ? `<span class="tag tag-pipeline scenes-tag">${indexed} scenes</span>` : ''}
+        ${pending  ? `<span class="tag-downloading">${pending} downloading</span>` : ''}
       </div>`;
     div.onclick = () => selectFire(f);
     list.appendChild(div);
