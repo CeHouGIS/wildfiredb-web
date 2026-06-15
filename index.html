@@ -1057,7 +1057,7 @@ function renderFireList(fires) {
     div.dataset.fireId = f.fire_id;
     const diskN   = _diskCounts[f.fire_id] || 0;
     const indexed = f.n_scenes || 0;
-    const pending = Math.max(0, diskN - indexed);
+    const pending = f.status !== 'completed' ? Math.max(0, diskN - indexed) : 0;
     div.innerHTML = `
       <div class="fire-name">${f.name || f.fire_id}</div>
       <div class="fire-meta">${f.state} · ${f.year}${f.ig_date ? ' · ' + f.ig_date : ''}</div>
