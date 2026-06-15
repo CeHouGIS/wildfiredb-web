@@ -269,6 +269,11 @@
   .tag-downloading::before {
     content: '↓'; animation: pulse-dot 1s ease-in-out infinite;
   }
+  .tag-pending {
+    background: #2a2a1a; border: 1px solid #6e5e00;
+    color: #d4a017; font-size: 10px; border-radius: 10px;
+    padding: 1px 7px; display: inline-flex; align-items: center; gap: 3px;
+  }
   .scene-updated { animation: flash-green 1.2s ease-out; }
 </style>
 </head>
@@ -1004,6 +1009,7 @@ async function liveRefresh() {
     // detect changes vs current allFires
     const prevMap = Object.fromEntries((allFires || []).map(f => [f.fire_id, f.n_scenes]));
     allFires = fires;
+    populateFilters(fires);
     const changed = fires.filter(f => (f.n_scenes || 0) !== (prevMap[f.fire_id] || 0));
     applyFilters();
     if (changed.length) {
@@ -1026,24 +1032,27 @@ function populateFilters(fires) {
   const states   = [...new Set(fires.map(f => f.state).filter(Boolean))].sort();
   const years    = [...new Set(fires.map(f => f.year).filter(Boolean))].sort((a,b) => b-a);
   const statuses = [...new Set(fires.map(f => f.status).filter(Boolean))].sort();
-  const sel = document.getElementById('filter-state');
-  sel.innerHTML = '<option value="">All states</option>'
-                + states.map(s => `<option value="${s}">${s}</option>`).join('');
-  const yel = document.getElementById('filter-year');
-  yel.innerHTML = '<option value="">All years</option>'
-                + years.map(y => `<option value="${y}">${y}</option>`).join('');
-  const stl = document.getElementById('filter-status');
-  stl.innerHTML = '<option value="">All status</option>'
-                + statuses.map(s => `<option value="${s}">${s}</option>`).join('');
+
+  // Rebuild options while preserving current selection
+  function rebuild(id, label, opts, valFn) {
+    const el = document.getElementById(id);
+    const cur = el.value;
+    el.innerHTML = `<option value="">${label}</option>`
+                 + opts.map(v => `<option value="${v}"${v==cur?' selected':''}>${valFn ? valFn(v) : v}</option>`).join('');
+  }
+  rebuild('filter-state',  'All states',  states,   null);
+  rebuild('filter-year',   'All years',   years,    null);
+  rebuild('filter-status', 'All statuses', statuses, null);
 }
 
 function applyFilters() {
+  if (!allFires || !allFires.length) return;
   const state  = document.getElementById('filter-state').value;
   const year   = document.getElementById('filter-year').value;
   const status = document.getElementById('filter-status').value;
   let fires = allFires;
   if (state)  fires = fires.filter(f => f.state === state);
-  if (year)   fires = fires.filter(f => f.year == year);
+  if (year)   fires = fires.filter(f => String(f.year) === String(year));
   if (status) fires = fires.filter(f => f.status === status);
   renderFireList(fires);
 }
@@ -1057,16 +1066,19 @@ function renderFireList(fires) {
     div.dataset.fireId = f.fire_id;
     const diskN   = _diskCounts[f.fire_id] || 0;
     const indexed = f.n_scenes || 0;
-    const pending = f.status !== 'completed' ? Math.max(0, diskN - indexed) : 0;
+    const dlPending = f.status !== 'completed' ? Math.max(0, diskN - indexed) : 0;
+    const isPending = f.status === 'pending' && indexed === 0;
+    const stateStr = f.state || '??';
     div.innerHTML = `
       <div class="fire-name">${f.name || f.fire_id}</div>
-      <div class="fire-meta">${f.state} · ${f.year}${f.ig_date ? ' · ' + f.ig_date : ''}</div>
+      <div class="fire-meta">${stateStr} · ${f.year}${f.ig_date ? ' · ' + f.ig_date : ''}</div>
       <div class="fire-tags">
         <span class="tag tag-status-${f.status}">${f.status}</span>
         <span class="tag tag-pipeline">${f.pipeline}</span>
         ${f.n_buildings ? `<span class="tag tag-pipeline">${f.n_buildings.toLocaleString()} bldg</span>` : ''}
         ${indexed ? `<span class="tag tag-pipeline scenes-tag">${indexed} scenes</span>` : ''}
-        ${pending  ? `<span class="tag-downloading">${pending} downloading</span>` : ''}
+        ${dlPending ? `<span class="tag-downloading">${dlPending} downloading</span>` : ''}
+        ${isPending  ? `<span class="tag-pending">待入库</span>` : ''}
       </div>`;
     div.onclick = () => selectFire(f);
     list.appendChild(div);
