@@ -193,7 +193,7 @@
     pointer-events: none; }
   #swipe.active { display: block; }
   #swipe img { position: absolute; pointer-events: none; user-select: none;
-    -webkit-user-drag: none; max-width: none; }
+    -webkit-user-drag: none; max-width: none; visibility: hidden; }
   #swipe-post { z-index: 2; }
   #swipe-pre  { z-index: 1; }
   #swipe-handle { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff;
@@ -290,7 +290,9 @@
       <div class="stat-chip">Labels: <span id="gs-labels">—</span></div>
       <div class="stat-chip">Footprints: <span id="gs-footprints">—</span></div>
       <div class="stat-chip">Scenes: <span id="gs-scenes">—</span></div>
-      <div class="stat-chip" id="live-chip" title="Auto-refreshes every 2 min">
+      <div class="stat-chip" id="live-chip" role="button" tabindex="0"
+           title="API connection status; click to retry"
+           onclick="liveRefresh()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();liveRefresh()}">
         <span id="live-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#2ecc71;margin-right:4px;vertical-align:middle"></span>
         <span id="live-label" style="color:#8b949e">Live</span>
       </div>
@@ -314,7 +316,12 @@
 <div id="map-container">
   <div id="map"></div>
 
+  <!-- Hidden canvas used by the swipe MapLibre canvas source -->
+  <canvas id="swipe-blend-canvas" style="display:none"></canvas>
+
   <!-- Pre/Post swipe overlay (sliding-door before/after) -->
+  <!-- swipe-pre/post imgs are hidden (visibility:hidden); used only for image preloading.
+       The visible imagery is rendered as a MapLibre canvas source below buildings/perimeter. -->
   <div id="swipe">
     <img id="swipe-pre" alt="">
     <img id="swipe-post" alt="">
@@ -347,6 +354,9 @@
     <div class="legend-row"><div class="legend-dot" style="background:#e67e22"></div><span>Partial</span></div>
     <div class="legend-row"><div class="legend-dot" style="background:#e74c3c"></div><span>Destroyed</span></div>
     <div class="legend-row" style="margin-top:6px;border-top:1px solid #30363d;padding-top:6px">
+      <span style="font-size:11px;width:10px;text-align:center;flex-shrink:0">▲</span>
+      <span>ML Prediction (model only)</span></div>
+    <div class="legend-row">
       <div class="legend-dot" style="background:#4ea1ff"></div><span>Footprint (zoom ≥ 13)</span></div>
     <label class="legend-row" style="margin-top:6px;border-top:1px solid #30363d;padding-top:6px;cursor:pointer">
       <input type="checkbox" onchange="toggleMtbs(this)" style="margin:0 6px 0 0;cursor:pointer">
@@ -449,9 +459,21 @@
 // API base: same-origin by default; on GitHub Pages, set window.WILDFIRE_API
 // (e.g. in config.js) to the public backend URL (Cloudflare tunnel).
 const API = (window.WILDFIRE_API || '').replace(/\/$/, '');
-const ASSET_VER = '4';  // bump to force-refresh cached imagery/mosaic overlays
+const ASSET_VER = '5';  // bump to force-refresh cached imagery/mosaic overlays
 const DAMAGE_COLORS = ['#aaaaaa','#2ecc71','#f1c40f','#e67e22','#e74c3c'];
 const DAMAGE_NAMES  = ['Unknown','No Damage','Affected','Partial','Destroyed'];
+
+async function fetchJson(url, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`API returned HTTP ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 // ── Map setup ──────────────────────────────────────────────────────────────
 const map = new maplibregl.Map({
@@ -537,9 +559,33 @@ map.on('load', () => {
     }
   });
 
+  // Model-predicted buildings: triangle markers (▲) for buildings with no human assessment.
+  // Rendered on top of buildings-circle so the triangle distinguishes them from human-assessed.
+  map.addLayer({
+    id: 'buildings-model', type: 'symbol', source: 'buildings',
+    filter: ['==', ['get', 'has_model_label'], true],
+    layout: {
+      'text-field': '▲',
+      'text-size': ['interpolate', ['linear'], ['zoom'], 8, 9, 14, 15],
+      'text-allow-overlap': true,
+      'text-ignore-placement': true,
+      'text-anchor': 'center',
+    },
+    paint: {
+      'text-color': [
+        'match', ['get', 'consensus_damage'],
+        0, '#aaaaaa', 1, '#2ecc71', 2, '#f1c40f', 3, '#e67e22', 4, '#e74c3c',
+        '#aaaaaa'
+      ],
+      'text-opacity': 0.95,
+      'text-halo-color': '#0d1117',
+      'text-halo-width': 1.2,
+    }
+  });
+
   // Unified spatial lookup: any click resolves all layers at that coordinate
   map.on('click', onMapClick);
-  ['buildings-circle', 'footprints-fill'].forEach(lyr => {
+  ['buildings-circle', 'buildings-model', 'footprints-fill'].forEach(lyr => {
     map.on('mouseenter', lyr, () => map.getCanvas().style.cursor = 'pointer');
     map.on('mouseleave', lyr, () => map.getCanvas().style.cursor = '');
   });
@@ -547,8 +593,7 @@ map.on('load', () => {
   map.on('moveend', loadFootprintsInView);
   map.on('moveend', loadMtbsInView);
 
-  loadGlobalStats();
-  loadFires();
+  liveRefresh();
   loadDispersedList();
 
   // Auto-refresh every 2 minutes — picks up newly downloaded imagery
@@ -561,7 +606,7 @@ map.on('load', () => {
 let dispersedFires = new Set();
 async function loadDispersedList() {
   try {
-    const ids = await fetch(`${API}/api/analysis/subclusters/parents`).then(r => r.json());
+    const ids = await fetchJson(`${API}/api/analysis/subclusters/parents`);
     dispersedFires = new Set(ids);
   } catch (e) {}
 }
@@ -771,6 +816,23 @@ async function startSwipe() {
   swipeMeta = { pre, post };
   document.getElementById('swipe-pre').src  = `${API}/mosaics/${selectedFireId}__pre.png?v=${ASSET_VER}`;
   document.getElementById('swipe-post').src = `${API}/mosaics/${selectedFireId}__post.png?v=${ASSET_VER}`;
+
+  // Build MapLibre canvas source so swipe imagery renders below perimeter/buildings.
+  if (map.getLayer('swipe-blend-layer')) map.removeLayer('swipe-blend-layer');
+  if (map.getSource('swipe-blend'))      map.removeSource('swipe-blend');
+  const blendCanvas = document.getElementById('swipe-blend-canvas');
+  blendCanvas.width = 1024; blendCanvas.height = 1024;
+  map.addSource('swipe-blend', {
+    type: 'canvas', canvas: 'swipe-blend-canvas',
+    coordinates: pre.coordinates, animate: true,
+  });
+  map.addLayer({ id: 'swipe-blend-layer', type: 'raster', source: 'swipe-blend',
+                 paint: { 'raster-opacity': 1.0 } }, 'perimeter-fill');
+  // Redraw once each image finishes loading (they may still be fetching).
+  const onLoad = () => drawSwipeCanvas();
+  document.getElementById('swipe-pre').addEventListener('load', onLoad, { once: true });
+  document.getElementById('swipe-post').addEventListener('load', onLoad, { once: true });
+
   document.getElementById('swipe').classList.add('active');
   swipeX = map.getContainer().clientWidth / 2;
   positionSwipe();
@@ -789,6 +851,10 @@ function stopSwipe() {
   swipeMeta = null;
   map.off('render', positionSwipe);
   document.getElementById('swipe').classList.remove('active');
+  if (map.getLayer('swipe-blend-layer')) map.removeLayer('swipe-blend-layer');
+  if (map.getSource('swipe-blend'))      map.removeSource('swipe-blend');
+  const bc = document.getElementById('swipe-blend-canvas');
+  if (bc) bc.getContext('2d').clearRect(0, 0, bc.width, bc.height);
 }
 
 function _imgRect(coords) {            // coords: [NW, NE, SE, SW] of the image bbox
@@ -815,6 +881,27 @@ function positionSwipe() {
   document.getElementById('swipe-tag-pre').style.left  = '10px';
   document.getElementById('swipe-tag-post').style.right = '10px';
   document.getElementById('swipe-tag-post').style.left  = 'auto';
+  drawSwipeCanvas();
+}
+
+function drawSwipeCanvas() {
+  if (!swipeMeta) return;
+  const canvas = document.getElementById('swipe-blend-canvas');
+  const preEl  = document.getElementById('swipe-pre');
+  const postEl = document.getElementById('swipe-post');
+  if (!canvas || !preEl.complete || !postEl.complete) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  // Draw pre-fire image across the full canvas
+  ctx.drawImage(preEl, 0, 0, W, H);
+  // Draw post-fire image only to the RIGHT of the swipe divider
+  const preR = _imgRect(swipeMeta.pre.coordinates);
+  const frac = preR.w > 0 ? Math.max(0, Math.min(1, (swipeX - preR.left) / preR.w)) : 0.5;
+  const cutX = Math.round(frac * W);
+  if (cutX < W) {
+    ctx.drawImage(postEl, cutX, 0, W - cutX, H, cutX, 0, W - cutX, H);
+  }
 }
 
 (function initSwipeDrag() {
@@ -961,7 +1048,7 @@ let selectedFireId = null;
 let _prevSceneCount = 0;
 async function loadGlobalStats() {
   try {
-    const d = await fetch(`${API}/api/stats/global`).then(r => r.json());
+    const d = await fetchJson(`${API}/api/stats/global`);
     document.getElementById('gs-fires').textContent      = d.n_fires.toLocaleString();
     document.getElementById('gs-labels').textContent     = d.n_damage_labels.toLocaleString();
     document.getElementById('gs-footprints').textContent = (d.n_footprints || 0).toLocaleString();
@@ -978,32 +1065,27 @@ async function loadGlobalStats() {
   } catch(e) { console.warn('Stats load failed', e); }
 }
 
-// ── Fire list ──────────────────────────────────────────────────────────────
-async function loadFires() {
-  const fires = await fetch(`${API}/api/fires`).then(r => r.json());
-  allFires = fires;
-  populateFilters(fires);
-  renderFireList(fires);
-}
-
 // ── Live refresh (polling) ─────────────────────────────────────────────────
-let _diskCounts = {};  // fire_id → on-disk tif count (from /api/imagery/disk_scan)
+let _diskCounts = {};  // fire_id → on-disk scene count (from /api/scenes/disk_scan)
 async function liveRefresh() {
   const dot   = document.getElementById('live-dot');
   const label = document.getElementById('live-label');
+  const chip  = document.getElementById('live-chip');
   if (!dot) return;
   dot.classList.add('live-pulse');
+  dot.style.background = '#58a6ff';
   label.textContent = 'Syncing…';
   label.style.color = '#58a6ff';
+  if (chip) chip.title = `Checking ${API || window.location.origin}`;
   try {
     // fetch disk counts to detect in-progress downloads
     try {
-      const dc = await fetch(`${API}/api/scenes/disk_scan`).then(r => r.json());
+      const dc = await fetchJson(`${API}/api/scenes/disk_scan`);
       _diskCounts = dc;
     } catch(_) {}
 
     const [fires, ] = await Promise.all([
-      fetch(`${API}/api/fires`).then(r => r.json()),
+      fetchJson(`${API}/api/fires`),
       loadGlobalStats(),
     ]);
     // detect changes vs current allFires
@@ -1018,11 +1100,16 @@ async function liveRefresh() {
         if (el) { el.classList.add('scene-updated'); setTimeout(() => el.classList.remove('scene-updated'), 1200); }
       });
     }
+    dot.style.background = '#2ecc71';
     label.textContent = 'Live';
     label.style.color = '#2ecc71';
+    if (chip) chip.title = `Connected to ${API || window.location.origin}; click to refresh`;
   } catch(e) {
+    console.warn('API connection failed', e);
+    dot.style.background = '#e74c3c';
     label.textContent = 'Offline';
     label.style.color = '#e74c3c';
+    if (chip) chip.title = `Cannot reach ${API || window.location.origin}; click to retry`;
   } finally {
     dot.classList.remove('live-pulse');
   }
