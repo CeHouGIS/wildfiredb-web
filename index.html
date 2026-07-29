@@ -1067,22 +1067,6 @@ async function loadGlobalStats() {
 
 // ── Live refresh (polling) ─────────────────────────────────────────────────
 let _diskCounts = {};  // fire_id → on-disk scene count (from /api/scenes/disk_scan)
-let _diskScanInFlight = false;
-
-async function refreshDiskCounts() {
-  if (_diskScanInFlight) return;
-  _diskScanInFlight = true;
-  try {
-    // This endpoint scans the external scene store and can take tens of
-    // seconds. It enriches the UI, but must never gate API availability.
-    _diskCounts = await fetchJson(`${API}/api/scenes/disk_scan`, 90_000);
-    applyFilters();
-  } catch (e) {
-    console.warn('Disk scene scan delayed', e);
-  } finally {
-    _diskScanInFlight = false;
-  }
-}
 
 async function liveRefresh() {
   const dot   = document.getElementById('live-dot');
@@ -1103,9 +1087,6 @@ async function liveRefresh() {
     label.textContent = 'Online';
     label.style.color = '#2ecc71';
     if (chip) chip.title = `Connected to ${API || window.location.origin}; click to refresh`;
-
-    // Do not block the main refresh on the expensive external-disk scan.
-    void refreshDiskCounts();
 
     try {
       const [fires, ] = await Promise.all([
