@@ -1067,6 +1067,23 @@ async function loadGlobalStats() {
 
 // ── Live refresh (polling) ─────────────────────────────────────────────────
 let _diskCounts = {};  // fire_id → on-disk scene count (from /api/scenes/disk_scan)
+let _diskScanInFlight = false;
+
+async function refreshDiskCounts() {
+  if (_diskScanInFlight) return;
+  _diskScanInFlight = true;
+  try {
+    // This endpoint scans the external scene store and can take tens of
+    // seconds. It enriches the UI, but must never gate API availability.
+    _diskCounts = await fetchJson(`${API}/api/scenes/disk_scan`, 90_000);
+    applyFilters();
+  } catch (e) {
+    console.warn('Disk scene scan delayed', e);
+  } finally {
+    _diskScanInFlight = false;
+  }
+}
+
 async function liveRefresh() {
   const dot   = document.getElementById('live-dot');
   const label = document.getElementById('live-label');
@@ -1078,34 +1095,42 @@ async function liveRefresh() {
   label.style.color = '#58a6ff';
   if (chip) chip.title = `Checking ${API || window.location.origin}`;
   try {
-    // fetch disk counts to detect in-progress downloads
-    try {
-      const dc = await fetchJson(`${API}/api/scenes/disk_scan`);
-      _diskCounts = dc;
-    } catch(_) {}
-
-    const [fires, ] = await Promise.all([
-      fetchJson(`${API}/api/fires`),
-      loadGlobalStats(),
-    ]);
-    // detect changes vs current allFires
-    const prevMap = Object.fromEntries((allFires || []).map(f => [f.fire_id, f.n_scenes]));
-    allFires = fires;
-    populateFilters(fires);
-    const changed = fires.filter(f => (f.n_scenes || 0) !== (prevMap[f.fire_id] || 0));
-    applyFilters();
-    if (changed.length) {
-      changed.forEach(f => {
-        const el = document.querySelector(`[data-fire-id="${f.fire_id}"] .scenes-tag`);
-        if (el) { el.classList.add('scene-updated'); setTimeout(() => el.classList.remove('scene-updated'), 1200); }
-      });
-    }
+    // Availability is determined only by the lightweight health endpoint.
+    // Large data requests may be slow while DuckDB or the scene store is busy,
+    // but that does not mean the API is offline.
+    await fetchJson(`${API}/api/health`, 8_000);
     dot.style.background = '#2ecc71';
-    label.textContent = 'Live';
+    label.textContent = 'Online';
     label.style.color = '#2ecc71';
     if (chip) chip.title = `Connected to ${API || window.location.origin}; click to refresh`;
+
+    // Do not block the main refresh on the expensive external-disk scan.
+    void refreshDiskCounts();
+
+    try {
+      const [fires, ] = await Promise.all([
+        fetchJson(`${API}/api/fires`, 30_000),
+        loadGlobalStats(),
+      ]);
+      // detect changes vs current allFires
+      const prevMap = Object.fromEntries((allFires || []).map(f => [f.fire_id, f.n_scenes]));
+      allFires = fires;
+      populateFilters(fires);
+      const changed = fires.filter(f => (f.n_scenes || 0) !== (prevMap[f.fire_id] || 0));
+      applyFilters();
+      if (changed.length) {
+        changed.forEach(f => {
+          const el = document.querySelector(`[data-fire-id="${f.fire_id}"] .scenes-tag`);
+          if (el) { el.classList.add('scene-updated'); setTimeout(() => el.classList.remove('scene-updated'), 1200); }
+        });
+      }
+    } catch (e) {
+      // Keep the accurate online state and retain already-rendered data.
+      console.warn('API is online, but data refresh is delayed', e);
+      if (chip) chip.title = `API online at ${API || window.location.origin}; data refresh delayed`;
+    }
   } catch(e) {
-    console.warn('API connection failed', e);
+    console.warn('API health check failed', e);
     dot.style.background = '#e74c3c';
     label.textContent = 'Offline';
     label.style.color = '#e74c3c';
