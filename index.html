@@ -172,6 +172,23 @@
   #year-slider { width: 320px; cursor: pointer; }
   #year-label { font-size: 18px; font-weight: 700; color: #58a6ff; min-width: 48px; text-align: center; }
   #year-count { font-size: 10px; color: #8b949e; }
+  #prediction-bar {
+    position: absolute; top: 64px; left: 50%; transform: translateX(-50%);
+    background: rgba(13,17,23,0.94); border: 1px solid #30363d;
+    border-radius: 10px; padding: 7px 10px; font-size: 11px; color: #c9d1d9;
+    backdrop-filter: blur(6px); display: flex; align-items: center; gap: 7px;
+    z-index: 95; white-space: nowrap;
+  }
+  .prediction-label { color: #8b949e; font-size: 10px; text-transform: uppercase;
+    letter-spacing: .4px; margin-right: 2px; }
+  .prediction-btn {
+    background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+    border-radius: 6px; padding: 5px 9px; cursor: pointer; font-size: 11px;
+  }
+  .prediction-btn.active { background: #1f6feb; border-color: #58a6ff; color: #fff; }
+  .prediction-btn:hover { background: #30363d; }
+  .prediction-count { font-weight: 700; margin-left: 4px; }
+  #prediction-added { color: #d29922; font-size: 10px; min-width: 78px; }
   #mosaic-bar {
     position: absolute; top: 200px; right: 12px; width: 300px;
     background: rgba(13,17,23,0.92); border: 1px solid #30363d;
@@ -340,6 +357,21 @@
     <span id="year-label">—</span>
     <span id="year-count"></span>
   </div>
+  <div id="prediction-bar" title="Compare original human labels with the dataset after model inference">
+    <span class="prediction-label">Damage labels</span>
+    <button class="prediction-btn" id="prediction-before"
+            onclick="setPredictionView('before')">
+      Before prediction · Human
+      <span class="prediction-count" id="prediction-before-count">—</span>
+    </button>
+    <span style="color:#8b949e">→</span>
+    <button class="prediction-btn active" id="prediction-after"
+            onclick="setPredictionView('after')">
+      After prediction · Human + ML
+      <span class="prediction-count" id="prediction-after-count">—</span>
+    </button>
+    <span id="prediction-added">select a fire</span>
+  </div>
   <div id="loading-overlay">Loading buildings...</div>
   <div id="footprint-hint" style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%);
        background:rgba(13,17,23,0.85);color:#7cc0ff;font-size:11px;padding:5px 12px;border-radius:14px;
@@ -354,8 +386,11 @@
     <div class="legend-row"><div class="legend-dot" style="background:#e67e22"></div><span>Partial</span></div>
     <div class="legend-row"><div class="legend-dot" style="background:#e74c3c"></div><span>Destroyed</span></div>
     <div class="legend-row" style="margin-top:6px;border-top:1px solid #30363d;padding-top:6px">
+      <div class="legend-dot" style="background:#c9d1d9"></div>
+      <span>Before prediction · human label</span></div>
+    <div class="legend-row">
       <span style="font-size:11px;width:10px;text-align:center;flex-shrink:0">▲</span>
-      <span>ML Prediction (model only)</span></div>
+      <span>Added after prediction · model-only</span></div>
     <div class="legend-row">
       <div class="legend-dot" style="background:#4ea1ff"></div><span>Footprint (zoom ≥ 13)</span></div>
     <label class="legend-row" style="margin-top:6px;border-top:1px solid #30363d;padding-top:6px;cursor:pointer">
@@ -546,6 +581,7 @@ map.on('load', () => {
   map.addSource('buildings', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }});
   map.addLayer({
     id: 'buildings-circle', type: 'circle', source: 'buildings',
+    filter: ['==', ['get', 'has_human_label'], true],
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 3, 14, 6],
       'circle-color': [
@@ -563,7 +599,10 @@ map.on('load', () => {
   // Rendered on top of buildings-circle so the triangle distinguishes them from human-assessed.
   map.addLayer({
     id: 'buildings-model', type: 'symbol', source: 'buildings',
-    filter: ['==', ['get', 'has_model_label'], true],
+    filter: ['all',
+      ['==', ['get', 'has_model_label'], true],
+      ['!=', ['get', 'has_human_label'], true],
+    ],
     layout: {
       'text-field': '▲',
       'text-size': ['interpolate', ['linear'], ['zoom'], 8, 9, 14, 15],
@@ -1043,6 +1082,40 @@ async function loadFootprintsInView() {
 // ── State ──────────────────────────────────────────────────────────────────
 let allFires = [];
 let selectedFireId = null;
+let predictionView = 'after';
+let selectedPredictionCoverage = { human: 0, modelOnly: 0, both: 0 };
+
+function setPredictionView(mode) {
+  predictionView = mode === 'before' ? 'before' : 'after';
+  document.getElementById('prediction-before').classList.toggle('active', predictionView === 'before');
+  document.getElementById('prediction-after').classList.toggle('active', predictionView === 'after');
+  if (map.isStyleLoaded() && map.getLayer('buildings-model')) {
+    map.setLayoutProperty(
+      'buildings-model',
+      'visibility',
+      predictionView === 'after' ? 'visible' : 'none'
+    );
+  }
+}
+
+function updatePredictionCoverage(featureCollection) {
+  const features = (featureCollection && featureCollection.features) || [];
+  let human = 0, modelOnly = 0, both = 0;
+  features.forEach(feature => {
+    const properties = feature.properties || {};
+    const hasHuman = properties.has_human_label === true;
+    const hasModel = properties.has_model_label === true;
+    if (hasHuman) human += 1;
+    if (hasModel && !hasHuman) modelOnly += 1;
+    if (hasModel && hasHuman) both += 1;
+  });
+  selectedPredictionCoverage = { human, modelOnly, both };
+  document.getElementById('prediction-before-count').textContent = human.toLocaleString();
+  document.getElementById('prediction-after-count').textContent =
+    (human + modelOnly).toLocaleString();
+  document.getElementById('prediction-added').textContent =
+    modelOnly ? `+${modelOnly.toLocaleString()} ML-only` : 'no ML-only additions';
+}
 
 // ── Global stats ───────────────────────────────────────────────────────────
 let _prevSceneCount = 0;
@@ -1181,6 +1254,10 @@ function renderFireList(fires) {
 // ── Fire selection ─────────────────────────────────────────────────────────
 async function selectFire(fire) {
   selectedFireId = fire.fire_id;
+  selectedPredictionCoverage = { human: 0, modelOnly: 0, both: 0 };
+  document.getElementById('prediction-before-count').textContent = '…';
+  document.getElementById('prediction-after-count').textContent = '…';
+  document.getElementById('prediction-added').textContent = 'loading…';
   applyFilters();   // re-render keeping the active state/year/status filter
 
   // Fly to fire extent
@@ -1217,6 +1294,8 @@ async function selectFire(fire) {
   try {
     const bldgs = await fetch(`${API}/api/fires/${fire.fire_id}/buildings`).then(r => r.json());
     map.getSource('buildings').setData(bldgs);
+    updatePredictionCoverage(bldgs);
+    setPredictionView(predictionView);
   } finally {
     document.getElementById('loading-overlay').style.display = 'none';
   }
@@ -1255,6 +1334,24 @@ async function loadFireDetail(fire) {
       <span class="source-name">Buildings</span>
       <span>${(stats.total_buildings||0).toLocaleString()}</span>
     </div>
+    <div class="section-title">Prediction Coverage</div>
+    <div class="source-row">
+      <span class="source-name">Before prediction · human labels</span>
+      <span>${selectedPredictionCoverage.human.toLocaleString()}</span>
+    </div>
+    <div class="source-row" style="border-left:2px solid #d29922">
+      <span style="color:#d29922">Added by model · ML-only</span>
+      <span>+${selectedPredictionCoverage.modelOnly.toLocaleString()}</span>
+    </div>
+    <div class="source-row">
+      <span class="source-name">After prediction · human + ML</span>
+      <span>${(selectedPredictionCoverage.human + selectedPredictionCoverage.modelOnly).toLocaleString()}</span>
+    </div>
+    ${selectedPredictionCoverage.both ? `
+    <div style="font-size:10px;color:#8b949e;margin:3px 0 8px 9px">
+      ${selectedPredictionCoverage.both.toLocaleString()} buildings have both human and model labels
+    </div>` : ''}
+    <div class="section-title">Agreement</div>
     <div class="source-row">
       <span class="source-name">Multi-source</span>
       <span>${(stats.n_multi_source||0).toLocaleString()}</span>
