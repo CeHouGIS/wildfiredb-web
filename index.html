@@ -1085,7 +1085,7 @@ let selectedFireId = null;
 let predictionView = 'after';
 let selectedPredictionCoverage = { human: 0, modelOnly: 0, both: 0 };
 
-function setPredictionView(mode) {
+function setPredictionView(mode, refreshCoverage = true) {
   predictionView = mode === 'before' ? 'before' : 'after';
   document.getElementById('prediction-before').classList.toggle('active', predictionView === 'before');
   document.getElementById('prediction-after').classList.toggle('active', predictionView === 'after');
@@ -1096,6 +1096,7 @@ function setPredictionView(mode) {
       predictionView === 'after' ? 'visible' : 'none'
     );
   }
+  if (refreshCoverage && selectedFireId) loadCoverage(selectedFireId);
 }
 
 function updatePredictionCoverage(featureCollection) {
@@ -1172,6 +1173,8 @@ async function liveRefresh() {
       populateFilters(fires);
       const changed = fires.filter(f => (f.n_scenes || 0) !== (prevMap[f.fire_id] || 0));
       applyFilters();
+      coverageCache.clear();
+      if (selectedFireId) void loadCoverage(selectedFireId);
       if (changed.length) {
         changed.forEach(f => {
           const el = document.querySelector(`[data-fire-id="${f.fire_id}"] .scenes-tag`);
@@ -1295,7 +1298,7 @@ async function selectFire(fire) {
     const bldgs = await fetch(`${API}/api/fires/${fire.fire_id}/buildings`).then(r => r.json());
     map.getSource('buildings').setData(bldgs);
     updatePredictionCoverage(bldgs);
-    setPredictionView(predictionView);
+    setPredictionView(predictionView, false);
   } finally {
     document.getElementById('loading-overlay').style.display = 'none';
   }
@@ -1428,22 +1431,45 @@ async function loadSelfPerimeter(fireId) {
 }
 
 // ── Coverage analysis (labels vs footprints vs perimeter) ────────────────────
+let coverageRequest = 0;
+const coverageCache = new Map();
+
 async function loadCoverage(fireId) {
   const box = document.getElementById('coverage-box');
   if (!box) return;
+  const stage = predictionView;
+  const stageLabel = stage === 'before'
+    ? 'Before prediction · human labels'
+    : 'After prediction · human + ML';
+  const requestId = ++coverageRequest;
+  box.innerHTML = `<span style="color:#8b949e">computing ${stageLabel.toLowerCase()}…</span>`;
+
   let d;
   try {
-    const r = await fetch(`${API}/api/analysis/${fireId}`);
-    if (!r.ok) throw new Error('none');
-    d = await r.json();
+    const cacheKey = `${fireId}|${stage}`;
+    if (coverageCache.has(cacheKey)) {
+      d = coverageCache.get(cacheKey);
+    } else {
+      const r = await fetch(
+        `${API}/api/analysis/${fireId}?prediction_stage=${encodeURIComponent(stage)}`
+      );
+      if (!r.ok) throw new Error('none');
+      d = await r.json();
+      coverageCache.set(cacheKey, d);
+    }
   } catch (e) {
+    if (requestId !== coverageRequest) return;
     box.innerHTML = '<span style="color:#8b949e">no footprint coverage data for this fire</span>';
     return;
   }
+  if (requestId !== coverageRequest || stage !== predictionView) return;
+
   const pct = n => d.n_labelled_buildings ? (100 * n / d.n_labelled_buildings).toFixed(0) : 0;
   const out = d.labels_outside_perimeter || { total: null, pct: null };
 
   let html = `
+    <div style="font-size:10px;color:${stage === 'before' ? '#58a6ff' : '#d29922'};
+                margin-bottom:7px;font-weight:600">${stageLabel}</div>
     <div class="source-row"><span class="source-name">Labelled buildings</span>
       <span>${d.n_labelled_buildings.toLocaleString()}</span></div>`;
 
