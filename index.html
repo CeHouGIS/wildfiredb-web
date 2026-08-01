@@ -505,7 +505,7 @@
 // API base: same-origin by default; on GitHub Pages, set window.WILDFIRE_API
 // (e.g. in config.js) to the public backend URL (Cloudflare tunnel).
 const API = (window.WILDFIRE_API || '').replace(/\/$/, '');
-const ASSET_VER = '5';  // bump to force-refresh cached imagery/mosaic overlays
+const ASSET_VER = '6';  // bump to force-refresh cached imagery/mosaic overlays
 const DAMAGE_COLORS = ['#aaaaaa','#2ecc71','#f1c40f','#e67e22','#e74c3c'];
 const DAMAGE_NAMES  = ['Unknown','No Damage','Affected','Partial','Destroyed'];
 const LABELER_NAMES = { human: 'Human survey', model: 'Model prediction' };
@@ -545,7 +545,10 @@ async function fetchJson(url, timeoutMs = 15000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, {
+      signal: controller.signal,
+      cache: 'no-store',
+    });
     if (!response.ok) throw new Error(`API returned HTTP ${response.status}`);
     return await response.json();
   } finally {
