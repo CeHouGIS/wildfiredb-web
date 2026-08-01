@@ -62,6 +62,11 @@
   .tag-status-imagery_downloaded { background: #1a3a2a; color: #56d3a0; }
   .tag-status-pending   { background: #2d2a1a; color: #d29922; }
   .tag-status-downloading { background: #1a2a3a; color: #58a6ff; }
+  .tag-imagery-ready { background: #15352d; color: #56d3a0; }
+  .tag-imagery-missing { background: #342b19; color: #e3b341; }
+  .tag-inference-complete { background: #17375e; color: #79c0ff; }
+  .tag-inference-partial { background: #322b1b; color: #d29922; }
+  .tag-inference-waiting { background: #272b31; color: #8b949e; }
   .tag-pipeline { background: #21262d; color: #8b949e; }
 
   /* ── Map ── */
@@ -305,7 +310,9 @@
     <button id="view-toggle" onclick="openAnalysis()">📊 Analysis dashboard ▸</button>
     <div id="global-stats">
       <div class="stat-chip">Fires: <span id="gs-fires">—</span></div>
-      <div class="stat-chip">Damage labels: <span id="gs-labels">—</span></div>
+      <div class="stat-chip">Buildings: <span id="gs-buildings">—</span></div>
+      <div class="stat-chip">Human-labelled: <span id="gs-human">—</span></div>
+      <div class="stat-chip">Model-predicted: <span id="gs-model">—</span></div>
       <div class="stat-chip">Footprints: <span id="gs-footprints">—</span></div>
       <div class="stat-chip">Scenes: <span id="gs-scenes">—</span></div>
       <div class="stat-chip" id="live-chip" role="button" tabindex="0"
@@ -323,8 +330,14 @@
     <select class="filter-select" id="filter-year" onchange="applyFilters()">
       <option value="">All years</option>
     </select>
-    <select class="filter-select" id="filter-status" onchange="applyFilters()">
-      <option value="">All status</option>
+    <select class="filter-select" id="filter-label" onchange="applyFilters()">
+      <option value="">All label sources</option>
+    </select>
+    <select class="filter-select" id="filter-imagery" onchange="applyFilters()">
+      <option value="">All imagery states</option>
+    </select>
+    <select class="filter-select" id="filter-inference" onchange="applyFilters()">
+      <option value="">All prediction states</option>
     </select>
   </div>
   <div id="fire-list"></div>
@@ -380,18 +393,15 @@
     Zoom in to see building footprints
   </div>
   <div id="map-legend">
-    <h4>Damage class</h4>
+    <h4>Human survey · 5 classes</h4>
     <div class="legend-row"><div class="legend-dot" style="background:#aaaaaa"></div><span>Unknown</span></div>
     <div class="legend-row"><div class="legend-dot" style="background:#2ecc71"></div><span>No Damage</span></div>
     <div class="legend-row"><div class="legend-dot" style="background:#f1c40f"></div><span>Affected</span></div>
     <div class="legend-row"><div class="legend-dot" style="background:#e67e22"></div><span>Partial</span></div>
     <div class="legend-row"><div class="legend-dot" style="background:#e74c3c"></div><span>Destroyed</span></div>
-    <div class="legend-row" style="margin-top:6px;border-top:1px solid #30363d;padding-top:6px">
-      <div class="legend-dot" style="background:#c9d1d9"></div>
-      <span>Human survey label</span></div>
-    <div class="legend-row">
-      <span style="font-size:11px;width:10px;text-align:center;flex-shrink:0">▲</span>
-      <span>Model prediction (new)</span></div>
+    <h4 style="margin-top:8px;border-top:1px solid #30363d;padding-top:7px">Model prediction · binary</h4>
+    <div class="legend-row"><span style="font-size:11px;width:10px;color:#2ecc71;text-align:center">▲</span><span>No Damage</span></div>
+    <div class="legend-row"><span style="font-size:11px;width:10px;color:#e74c3c;text-align:center">▲</span><span>Destroyed</span></div>
     <div class="legend-row">
       <div class="legend-dot" style="background:#4ea1ff"></div><span>Footprint (zoom ≥ 13)</span></div>
     <label class="legend-row" style="margin-top:6px;border-top:1px solid #30363d;padding-top:6px;cursor:pointer">
@@ -513,6 +523,23 @@ function statusName(status) {
   return STATUS_NAMES[status] || String(status || '').replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, c => c.toUpperCase());
 }
+const LABEL_STATUS_NAMES = {
+  human_and_model: 'Human + model', human_only: 'Human only',
+  model_only: 'Model only', unlabelled: 'No labels'
+};
+const IMAGERY_STATUS_NAMES = {
+  pre_post_ready: 'Pre + post ready', pre_missing: 'Pre-fire missing',
+  post_missing: 'Post-fire missing', no_imagery: 'No imagery',
+  date_missing: 'Ignition date missing'
+};
+const INFERENCE_STATUS_NAMES = {
+  complete: 'Prediction complete', partial: 'Prediction partial',
+  ready: 'Ready for prediction', not_ready: 'Not ready'
+};
+
+function stageName(mapping, value) {
+  return mapping[value] || String(value || '').replace(/[_-]+/g, ' ');
+}
 
 async function fetchJson(url, timeoutMs = 15000) {
   const controller = new AbortController();
@@ -601,7 +628,7 @@ map.on('load', () => {
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 3, 14, 6],
       'circle-color': [
-        'match', ['get', 'consensus_damage'],
+        'match', ['get', 'human_damage'],
         0, '#aaaaaa', 1, '#2ecc71', 2, '#f1c40f', 3, '#e67e22', 4, '#e74c3c',
         '#aaaaaa'
       ],
@@ -628,8 +655,8 @@ map.on('load', () => {
     },
     paint: {
       'text-color': [
-        'match', ['get', 'consensus_damage'],
-        0, '#aaaaaa', 1, '#2ecc71', 2, '#f1c40f', 3, '#e67e22', 4, '#e74c3c',
+        'match', ['get', 'model_damage'],
+        1, '#2ecc71', 4, '#e74c3c',
         '#aaaaaa'
       ],
       'text-opacity': 0.95,
@@ -1134,13 +1161,40 @@ function updatePredictionCoverage(featureCollection) {
     modelOnly ? `+${modelOnly.toLocaleString()} predicted only` : 'no new model predictions';
 }
 
+async function loadPredictionCoverageCounts(fireId) {
+  try {
+    const [beforeResponse, afterResponse] = await Promise.all([
+      fetch(`${API}/api/analysis/${fireId}?prediction_stage=before`),
+      fetch(`${API}/api/analysis/${fireId}?prediction_stage=after`)
+    ]);
+    if (!beforeResponse.ok || !afterResponse.ok) throw new Error('coverage unavailable');
+    const [before, after] = await Promise.all([
+      beforeResponse.json(), afterResponse.json()
+    ]);
+    if (fireId !== selectedFireId) return;
+    const human = before.n_labelled_buildings || 0;
+    const combined = after.n_labelled_buildings || 0;
+    const modelOnly = Math.max(0, combined - human);
+    selectedPredictionCoverage = { human, modelOnly, both: 0 };
+    document.getElementById('prediction-before-count').textContent = human.toLocaleString();
+    document.getElementById('prediction-after-count').textContent = combined.toLocaleString();
+    document.getElementById('prediction-added').textContent = modelOnly
+      ? `+${modelOnly.toLocaleString()} predicted only`
+      : (human ? 'no new model predictions' : 'no human survey labels');
+  } catch (error) {
+    console.warn('Prediction coverage counts unavailable', error);
+  }
+}
+
 // ── Global stats ───────────────────────────────────────────────────────────
 let _prevSceneCount = 0;
 async function loadGlobalStats() {
   try {
     const d = await fetchJson(`${API}/api/stats/global`);
     document.getElementById('gs-fires').textContent      = d.n_fires.toLocaleString();
-    document.getElementById('gs-labels').textContent     = d.n_damage_labels.toLocaleString();
+    document.getElementById('gs-buildings').textContent = d.n_buildings.toLocaleString();
+    document.getElementById('gs-human').textContent     = d.n_human_buildings.toLocaleString();
+    document.getElementById('gs-model').textContent     = d.n_model_buildings.toLocaleString();
     document.getElementById('gs-footprints').textContent = (d.n_footprints || 0).toLocaleString();
     const scEl = document.getElementById('gs-scenes');
     const newCount = d.n_image_scenes;
@@ -1216,7 +1270,9 @@ async function liveRefresh() {
 function populateFilters(fires) {
   const states   = [...new Set(fires.map(f => f.state).filter(Boolean))].sort();
   const years    = [...new Set(fires.map(f => f.year).filter(Boolean))].sort((a,b) => b-a);
-  const statuses = [...new Set(fires.map(f => f.status).filter(Boolean))].sort();
+  const labelStates = [...new Set(fires.map(f => f.label_status).filter(Boolean))].sort();
+  const imageryStates = [...new Set(fires.map(f => f.imagery_status).filter(Boolean))].sort();
+  const inferenceStates = [...new Set(fires.map(f => f.inference_status).filter(Boolean))].sort();
 
   // Rebuild options while preserving current selection
   function rebuild(id, label, opts, valFn) {
@@ -1227,18 +1283,27 @@ function populateFilters(fires) {
   }
   rebuild('filter-state',  'All states',  states,   null);
   rebuild('filter-year',   'All years',   years,    null);
-  rebuild('filter-status', 'All statuses', statuses, statusName);
+  rebuild('filter-label', 'All label sources', labelStates,
+          v => stageName(LABEL_STATUS_NAMES, v));
+  rebuild('filter-imagery', 'All imagery states', imageryStates,
+          v => stageName(IMAGERY_STATUS_NAMES, v));
+  rebuild('filter-inference', 'All prediction states', inferenceStates,
+          v => stageName(INFERENCE_STATUS_NAMES, v));
 }
 
 function applyFilters() {
   if (!allFires || !allFires.length) return;
   const state  = document.getElementById('filter-state').value;
   const year   = document.getElementById('filter-year').value;
-  const status = document.getElementById('filter-status').value;
+  const labelStatus = document.getElementById('filter-label').value;
+  const imageryStatus = document.getElementById('filter-imagery').value;
+  const inferenceStatus = document.getElementById('filter-inference').value;
   let fires = allFires;
   if (state)  fires = fires.filter(f => f.state === state);
   if (year)   fires = fires.filter(f => String(f.year) === String(year));
-  if (status) fires = fires.filter(f => f.status === status);
+  if (labelStatus) fires = fires.filter(f => f.label_status === labelStatus);
+  if (imageryStatus) fires = fires.filter(f => f.imagery_status === imageryStatus);
+  if (inferenceStatus) fires = fires.filter(f => f.inference_status === inferenceStatus);
   renderFireList(fires);
 }
 
@@ -1251,19 +1316,25 @@ function renderFireList(fires) {
     div.dataset.fireId = f.fire_id;
     const diskN   = _diskCounts[f.fire_id] || 0;
     const indexed = f.n_scenes || 0;
-    const dlPending = f.status !== 'completed' ? Math.max(0, diskN - indexed) : 0;
-    const isPending = f.status === 'pending' && indexed === 0;
+    const dlPending = Math.max(0, diskN - indexed);
     const stateStr = f.state || '??';
+    const imageryReady = f.imagery_status === 'pre_post_ready';
+    const inferenceClass = f.inference_status === 'complete' ? 'complete'
+      : f.inference_status === 'partial' ? 'partial' : 'waiting';
     div.innerHTML = `
       <div class="fire-name">${f.name || f.fire_id}</div>
       <div class="fire-meta">${stateStr} · ${f.year}${f.ig_date ? ' · ' + f.ig_date : ''}</div>
       <div class="fire-tags">
-        <span class="tag tag-status-${f.status}">${statusName(f.status)}</span>
-        <span class="tag tag-pipeline">${f.pipeline}</span>
+        <span class="tag ${imageryReady ? 'tag-imagery-ready' : 'tag-imagery-missing'}"
+              title="${f.n_pre_scenes || 0} pre-fire / ${f.n_post_scenes || 0} post-fire scenes">
+          ${stageName(IMAGERY_STATUS_NAMES, f.imagery_status)}</span>
+        <span class="tag tag-inference-${inferenceClass}"
+              title="${(f.n_model_buildings || 0).toLocaleString()} model-labelled buildings">
+          ${stageName(INFERENCE_STATUS_NAMES, f.inference_status)}</span>
         ${f.n_buildings ? `<span class="tag tag-pipeline">${f.n_buildings.toLocaleString()} bldg</span>` : ''}
         ${indexed ? `<span class="tag tag-pipeline scenes-tag">${indexed} scenes</span>` : ''}
+        ${f.duplicate_count ? `<span class="tag tag-pipeline" title="Hidden aliases: ${f.alias_fire_ids.join(', ')}">${f.duplicate_count} alias${f.duplicate_count > 1 ? 'es' : ''} hidden</span>` : ''}
         ${dlPending ? `<span class="tag-downloading">${dlPending} downloading</span>` : ''}
-        ${isPending  ? `<span class="tag-pending">待入库</span>` : ''}
       </div>`;
     div.onclick = () => selectFire(f);
     list.appendChild(div);
@@ -1313,7 +1384,7 @@ async function selectFire(fire) {
   try {
     const bldgs = await fetch(`${API}/api/fires/${fire.fire_id}/buildings`).then(r => r.json());
     map.getSource('buildings').setData(bldgs);
-    updatePredictionCoverage(bldgs);
+    await loadPredictionCoverageCounts(fire.fire_id);
     setPredictionView(predictionView, false);
   } finally {
     document.getElementById('loading-overlay').style.display = 'none';
@@ -1386,22 +1457,29 @@ async function loadFireDetail(fire) {
       <span>${stats.n_high_disagreement}</span>
     </div>` : ''}
 
-    <div class="section-title">Canonical Distribution</div>
   `;
 
-  const dist = stats.canonical_distribution || {};
-  const maxVal = Math.max(...Object.values(dist), 1);
-  DAMAGE_NAMES.forEach((name, i) => {
-    const cnt = dist[name] || 0;
-    const pct = (cnt / maxVal * 100).toFixed(0);
-    html += `
-      <div class="dmg-bar-row">
-        <div class="dmg-label">${name}</div>
-        <div class="dmg-bar-bg">
-          <div class="dmg-bar-fill" style="width:${pct}%;background:${DAMAGE_COLORS[i]}"></div>
-        </div>
-        <div class="dmg-count">${cnt.toLocaleString()}</div>
-      </div>`;
+  const distributions = [
+    ['Human survey distribution · 5-class', stats.human_distribution || {}, DAMAGE_NAMES],
+    ['Model prediction distribution · binary', stats.model_distribution || {}, ['No Damage', 'Destroyed']]
+  ];
+  distributions.forEach(([title, dist, names]) => {
+    if (!Object.values(dist).some(Boolean)) return;
+    html += `<div class="section-title">${title}</div>`;
+    const maxVal = Math.max(...Object.values(dist), 1);
+    names.forEach(name => {
+      const i = DAMAGE_NAMES.indexOf(name);
+      const cnt = dist[name] || 0;
+      const pct = (cnt / maxVal * 100).toFixed(0);
+      html += `
+        <div class="dmg-bar-row">
+          <div class="dmg-label">${name}</div>
+          <div class="dmg-bar-bg">
+            <div class="dmg-bar-fill" style="width:${pct}%;background:${DAMAGE_COLORS[i]}"></div>
+          </div>
+          <div class="dmg-count">${cnt.toLocaleString()}</div>
+        </div>`;
+    });
   });
 
   html += `<div class="section-title">Sources</div><div class="source-list">`;
