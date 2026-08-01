@@ -59,6 +59,7 @@
     font-weight: 500;
   }
   .tag-status-completed { background: #1a3a1a; color: #56d364; }
+  .tag-status-imagery_downloaded { background: #1a3a2a; color: #56d3a0; }
   .tag-status-pending   { background: #2d2a1a; color: #d29922; }
   .tag-status-downloading { background: #1a2a3a; color: #58a6ff; }
   .tag-pipeline { background: #21262d; color: #8b949e; }
@@ -304,7 +305,7 @@
     <button id="view-toggle" onclick="openAnalysis()">📊 Analysis dashboard ▸</button>
     <div id="global-stats">
       <div class="stat-chip">Fires: <span id="gs-fires">—</span></div>
-      <div class="stat-chip">Labels: <span id="gs-labels">—</span></div>
+      <div class="stat-chip">Damage labels: <span id="gs-labels">—</span></div>
       <div class="stat-chip">Footprints: <span id="gs-footprints">—</span></div>
       <div class="stat-chip">Scenes: <span id="gs-scenes">—</span></div>
       <div class="stat-chip" id="live-chip" role="button" tabindex="0"
@@ -357,17 +358,17 @@
     <span id="year-label">—</span>
     <span id="year-count"></span>
   </div>
-  <div id="prediction-bar" title="Compare original human labels with the dataset after model inference">
-    <span class="prediction-label">Damage labels</span>
+  <div id="prediction-bar" title="Compare human survey labels with model predictions">
+    <span class="prediction-label">Prediction stage</span>
     <button class="prediction-btn" id="prediction-before"
             onclick="setPredictionView('before')">
-      Before prediction · Human
+      Before model · Human survey
       <span class="prediction-count" id="prediction-before-count">—</span>
     </button>
     <span style="color:#8b949e">→</span>
     <button class="prediction-btn active" id="prediction-after"
             onclick="setPredictionView('after')">
-      After prediction · Human + ML
+      After model · Human + predicted
       <span class="prediction-count" id="prediction-after-count">—</span>
     </button>
     <span id="prediction-added">select a fire</span>
@@ -379,7 +380,7 @@
     Zoom in to see building footprints
   </div>
   <div id="map-legend">
-    <h4>Damage Class</h4>
+    <h4>Damage class</h4>
     <div class="legend-row"><div class="legend-dot" style="background:#aaaaaa"></div><span>Unknown</span></div>
     <div class="legend-row"><div class="legend-dot" style="background:#2ecc71"></div><span>No Damage</span></div>
     <div class="legend-row"><div class="legend-dot" style="background:#f1c40f"></div><span>Affected</span></div>
@@ -387,10 +388,10 @@
     <div class="legend-row"><div class="legend-dot" style="background:#e74c3c"></div><span>Destroyed</span></div>
     <div class="legend-row" style="margin-top:6px;border-top:1px solid #30363d;padding-top:6px">
       <div class="legend-dot" style="background:#c9d1d9"></div>
-      <span>Before prediction · human label</span></div>
+      <span>Human survey label</span></div>
     <div class="legend-row">
       <span style="font-size:11px;width:10px;text-align:center;flex-shrink:0">▲</span>
-      <span>Added after prediction · model-only</span></div>
+      <span>Model prediction (new)</span></div>
     <div class="legend-row">
       <div class="legend-dot" style="background:#4ea1ff"></div><span>Footprint (zoom ≥ 13)</span></div>
     <label class="legend-row" style="margin-top:6px;border-top:1px solid #30363d;padding-top:6px;cursor:pointer">
@@ -497,6 +498,21 @@ const API = (window.WILDFIRE_API || '').replace(/\/$/, '');
 const ASSET_VER = '5';  // bump to force-refresh cached imagery/mosaic overlays
 const DAMAGE_COLORS = ['#aaaaaa','#2ecc71','#f1c40f','#e67e22','#e74c3c'];
 const DAMAGE_NAMES  = ['Unknown','No Damage','Affected','Partial','Destroyed'];
+const LABELER_NAMES = { human: 'Human survey', model: 'Model prediction' };
+const STATUS_NAMES = {
+  completed: 'Imagery complete',
+  imagery_downloaded: 'Imagery downloaded',
+  downloading: 'Downloading imagery',
+  pending: 'Awaiting imagery',
+  labeled: 'Labels available',
+  no_scenes: 'No imagery available',
+  archive: 'Archived'
+};
+
+function statusName(status) {
+  return STATUS_NAMES[status] || String(status || '').replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
 
 async function fetchJson(url, timeoutMs = 15000) {
   const controller = new AbortController();
@@ -1115,7 +1131,7 @@ function updatePredictionCoverage(featureCollection) {
   document.getElementById('prediction-after-count').textContent =
     (human + modelOnly).toLocaleString();
   document.getElementById('prediction-added').textContent =
-    modelOnly ? `+${modelOnly.toLocaleString()} ML-only` : 'no ML-only additions';
+    modelOnly ? `+${modelOnly.toLocaleString()} predicted only` : 'no new model predictions';
 }
 
 // ── Global stats ───────────────────────────────────────────────────────────
@@ -1211,7 +1227,7 @@ function populateFilters(fires) {
   }
   rebuild('filter-state',  'All states',  states,   null);
   rebuild('filter-year',   'All years',   years,    null);
-  rebuild('filter-status', 'All statuses', statuses, null);
+  rebuild('filter-status', 'All statuses', statuses, statusName);
 }
 
 function applyFilters() {
@@ -1242,7 +1258,7 @@ function renderFireList(fires) {
       <div class="fire-name">${f.name || f.fire_id}</div>
       <div class="fire-meta">${stateStr} · ${f.year}${f.ig_date ? ' · ' + f.ig_date : ''}</div>
       <div class="fire-tags">
-        <span class="tag tag-status-${f.status}">${f.status}</span>
+        <span class="tag tag-status-${f.status}">${statusName(f.status)}</span>
         <span class="tag tag-pipeline">${f.pipeline}</span>
         ${f.n_buildings ? `<span class="tag tag-pipeline">${f.n_buildings.toLocaleString()} bldg</span>` : ''}
         ${indexed ? `<span class="tag tag-pipeline scenes-tag">${indexed} scenes</span>` : ''}
@@ -1339,20 +1355,20 @@ async function loadFireDetail(fire) {
     </div>
     <div class="section-title">Prediction Coverage</div>
     <div class="source-row">
-      <span class="source-name">Before prediction · human labels</span>
+      <span class="source-name">Before model · human survey</span>
       <span>${selectedPredictionCoverage.human.toLocaleString()}</span>
     </div>
     <div class="source-row" style="border-left:2px solid #d29922">
-      <span style="color:#d29922">Added by model · ML-only</span>
+      <span style="color:#d29922">Added by model · predicted only</span>
       <span>+${selectedPredictionCoverage.modelOnly.toLocaleString()}</span>
     </div>
     <div class="source-row">
-      <span class="source-name">After prediction · human + ML</span>
+      <span class="source-name">After model · human + predicted</span>
       <span>${(selectedPredictionCoverage.human + selectedPredictionCoverage.modelOnly).toLocaleString()}</span>
     </div>
     ${selectedPredictionCoverage.both ? `
     <div style="font-size:10px;color:#8b949e;margin:3px 0 8px 9px">
-      ${selectedPredictionCoverage.both.toLocaleString()} buildings have both human and model labels
+      ${selectedPredictionCoverage.both.toLocaleString()} buildings have both survey and model labels
     </div>` : ''}
     <div class="section-title">Agreement</div>
     <div class="source-row">
@@ -1439,8 +1455,8 @@ async function loadCoverage(fireId) {
   if (!box) return;
   const stage = predictionView;
   const stageLabel = stage === 'before'
-    ? 'Before prediction · human labels'
-    : 'After prediction · human + ML';
+    ? 'Before model · human survey labels'
+    : 'After model · human + predicted labels';
   const requestId = ++coverageRequest;
   box.innerHTML = `<span style="color:#8b949e">computing ${stageLabel.toLowerCase()}…</span>`;
 
@@ -1470,7 +1486,7 @@ async function loadCoverage(fireId) {
   let html = `
     <div style="font-size:10px;color:${stage === 'before' ? '#58a6ff' : '#d29922'};
                 margin-bottom:7px;font-weight:600">${stageLabel}</div>
-    <div class="source-row"><span class="source-name">Labelled buildings</span>
+    <div class="source-row"><span class="source-name">Buildings with labels</span>
       <span>${d.n_labelled_buildings.toLocaleString()}</span></div>`;
 
   if (out.total != null) {
@@ -1494,7 +1510,7 @@ async function loadCoverage(fireId) {
     <div class="source-row"><span class="source-name">· with footprint</span>
       <span>${framed.toLocaleString()} (${pct(framed)}%)</span></div>
     <div class="source-row" style="border-left:2px solid #d29922">
-      <span style="color:#d29922">· labelled, NO footprint</span>
+      <span style="color:#d29922">· labeled, no footprint</span>
       <span>${lnf.total.toLocaleString()} (${pct(lnf.total)}%)</span></div>
     <div style="margin:4px 0 8px 10px;font-size:10px">
       <span style="color:#e74c3c">damaged ${lnf.damaged.toLocaleString()}</span> ·
@@ -1504,7 +1520,7 @@ async function loadCoverage(fireId) {
     <div class="source-row"><span class="source-name">Footprints in perimeter</span>
       <span>${d.n_footprints.toLocaleString()}</span></div>
     <div class="source-row" style="border-left:2px solid #58a6ff">
-      <span style="color:#58a6ff">· footprint, NO label</span>
+      <span style="color:#58a6ff">· footprint, no label</span>
       <span>${d.footprints_unlabelled.toLocaleString()} (${fpUnlabPct}%)</span></div>
     <div style="margin-top:6px;font-size:10px;color:#8b949e">match radius ${d.match_radius_m} m</div>`;
   } else {
@@ -1554,7 +1570,7 @@ async function onMapClick(e) {
       const n2 = DAMAGE_NAMES[l.damage_class] || 'Unknown';
       html += `<div class="building-label-row">
         <div class="building-source">${l.source_display_name || l.source}
-          <span class="source-type-${l.labeler_type}">[${l.labeler_type}]</span></div>
+          <span class="source-type-${l.labeler_type}">${LABELER_NAMES[l.labeler_type] || l.labeler_type}</span></div>
         <div class="building-dmg"><span style="color:${c2};font-weight:600">${n2}</span>
           ${l.damage_label && l.damage_label !== n2 ? ` <span style="color:#8b949e">(${l.damage_label})</span>` : ''}</div>
         ${l.event_date ? `<div style="font-size:10px;color:#8b949e">${l.event_date}</div>` : ''}
