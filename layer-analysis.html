@@ -135,7 +135,8 @@
 <script>
 const API = (window.WILDFIRE_API || '').replace(/\/$/, '');
 const SOURCE_NAMES = { ms: 'Microsoft Building Footprints', osm: 'OpenStreetMap',
-  ours2: 'Supplemental footprint layer', google: 'Google', unknown: 'Unknown' };
+  gba: 'Google Building Aggregates (GBA)', ours2: 'Supplemental footprint layer',
+  google: 'Google', unknown: 'Unknown' };
 let DATA = null;
 let stageMode = 'compare';
 const fmt = n => Number(n || 0).toLocaleString();
@@ -173,7 +174,8 @@ function stagePanel(key) {
       <div class="card"><div class="value">${fmt(e.unique_events)}</div><div class="label">Deduplicated fire events</div></div>
       <div class="card"><div class="value">${fmt(e.matched_mtbs_events)}</div><div class="label">Unique matched MTBS events</div></div>
       <div class="card"><div class="value">${fmt(selected.total)}</div><div class="label">${category} damage records</div></div>
-      <div class="card"><div class="value">${fmt(fp.total)}</div><div class="label">Footprints inside perimeter</div></div>
+      <div class="card"><div class="value">${fmt(fp.layer_total)}</div><div class="label">Complete footprint map layer</div></div>
+      <div class="card"><div class="value">${fmt(fp.total)}</div><div class="label">Footprints inside matched perimeters · ${pct(fp.total, fp.layer_total)}</div></div>
     </div>
     <div class="flow">
       <div class="flow-node"><strong>${fmt(e.matched_mtbs_events)}</strong><span>MATCHED MTBS PERIMETERS</span></div><div class="arrow">→</div>
@@ -195,7 +197,7 @@ function stagePanel(key) {
         <tbody>${rows}</tbody></table></div>
     </section>
     <section class="box layer-footprints ${filter !== 'all' && filter !== 'footprints' ? 'hidden' : ''}">
-      <div class="box-head"><h3>3 · Building footprints inside perimeter</h3><span>${fmt(fp.events_with_layer)} events with a footprint layer</span></div>
+      <div class="box-head"><h3>3 · Building footprints inside matched perimeters</h3><span>${fmt(fp.total)} inside / ${fmt(fp.layer_total)} map-layer total · ${fmt(fp.events_with_layer)} events covered</span></div>
       <div class="table-scroll"><table><thead><tr><th>Footprint source</th><th>Count</th><th>Share</th><th>Events covered</th></tr></thead>
         <tbody>${sourceRows}<tr class="total-row"><td>Total</td><td>${fmt(fp.total)}</td><td>100.00%</td><td>${fmt(fp.events_with_layer)}</td></tr></tbody></table></div>
     </section>
