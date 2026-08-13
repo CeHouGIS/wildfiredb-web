@@ -161,6 +161,27 @@ function metricCell(value, total) {
   return `${fmt(value)} <span class="pct">${pct(value, total)}</span>`;
 }
 
+function globalFootprintPanel() {
+  const fp = DATA.footprint_layer;
+  const filter = document.getElementById('layer-filter').value;
+  if (filter !== 'all' && filter !== 'footprints') return '';
+  const rows = fp.sources.map(s => `<tr><td class="source-cell">${SOURCE_NAMES[s.source] || s.source}
+      <div class="source-bar"><i style="width:${s.percent}%"></i></div></td>
+      <td>${fmt(s.count)}</td><td>${s.percent.toFixed(2)}%</td></tr>`).join('');
+  const overlaps = fp.multi_source_sets.map(s => `<tr><td>${s.sources.split('|').map(x => SOURCE_NAMES[x] || x).join(' + ')}</td>
+      <td>${fmt(s.count)}</td><td>${s.percent.toFixed(2)}%</td></tr>`).join('');
+  return `<section class="box layer-footprints">
+    <div class="box-head"><h3>Building footprint library · Exact-polygon deduplication</h3>
+      <span>${fmt(fp.raw_total)} raw records → ${fmt(fp.total)} unique polygons · ${fmt(fp.removed_duplicates)} duplicates removed</span></div>
+    <div class="subtable-title">Complete deduplicated library by source · independent of perimeter and prediction stage</div>
+    <div class="table-scroll"><table><thead><tr><th>Footprint source</th><th>Unique polygons</th><th>Share</th></tr></thead>
+      <tbody>${rows}<tr class="total-row"><td>Total unique polygons</td><td>${fmt(fp.total)}</td><td>100.00%</td></tr></tbody></table></div>
+    <div class="subtable-title">Identical polygons attributed to more than one source</div>
+    <div class="table-scroll"><table><thead><tr><th>Source combination</th><th>Unique polygons</th><th>Share of library</th></tr></thead>
+      <tbody>${overlaps}<tr class="total-row"><td>Total multi-source polygons</td><td>${fmt(fp.sources.find(s => s.source === 'multi_source')?.count || 0)}</td><td>${(fp.sources.find(s => s.source === 'multi_source')?.percent || 0).toFixed(2)}%</td></tr></tbody></table></div>
+  </section>`;
+}
+
 function stagePanel(key) {
   const d = DATA.stages[key], e = d.events, labels = d.damage_labels, fp = d.footprints;
   const category = document.getElementById('category-filter').value;
@@ -223,7 +244,7 @@ function stagePanel(key) {
 function render() {
   if (!DATA) return;
   const keys = stageMode === 'compare' ? ['before','after'] : [stageMode];
-  document.getElementById('content').innerHTML = `<div class="stage-grid ${keys.length === 1 ? 'single' : ''}">${keys.map(stagePanel).join('')}</div>
+  document.getElementById('content').innerHTML = `${globalFootprintPanel()}<div class="stage-grid ${keys.length === 1 ? 'single' : ''}">${keys.map(stagePanel).join('')}</div>
     <div class="method"><strong>Method.</strong> ${DATA.methodology.hard_match}. ${DATA.methodology.soft_match}.
     ${DATA.methodology.inside_test}. Footprints use ${DATA.methodology.footprints.toLowerCase()}.
     <br><strong>Generated:</strong> ${new Date(DATA.generated_at).toLocaleString()} · Percentages use the total in each row or table as their denominator.</div>`;
