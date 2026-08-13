@@ -77,6 +77,8 @@
   .source-cell { min-width: 145px; }
   .source-bar { height: 4px; border-radius: 2px; background: #30363d; margin-top: 4px; overflow: hidden; }
   .source-bar i { display: block; height: 100%; background: var(--cyan); }
+  .subtable-title { padding: 10px 13px 6px; color: var(--muted); font-size: 10px;
+    font-weight: 700; letter-spacing: .45px; text-transform: uppercase; }
   .tag { display: inline-block; border-radius: 12px; padding: 2px 7px; font-size: 9px; }
   .hard { color: #56d364; background: #173923; }
   .soft { color: #e3b341; background: #3d3216; }
@@ -136,7 +138,14 @@
 const API = (window.WILDFIRE_API || '').replace(/\/$/, '');
 const SOURCE_NAMES = { ms: 'Microsoft Building Footprints', osm: 'OpenStreetMap',
   gba: 'Google Building Aggregates (GBA)', ours2: 'Supplemental footprint layer',
-  google: 'Google', unknown: 'Unknown' };
+  google: 'Google', unknown: 'Unknown', multi_source: 'Multi-source identical polygon' };
+const DATASET_NAMES = { 'fire-damage-map': 'Fire-damage-map downloads',
+  mtbs_audit: 'MTBS / GBA perimeter audit',
+  'fire-damage-map|mtbs_audit': 'Both fire-damage-map and MTBS / GBA audit',
+  gba_gap_refresh_2026: 'GBA gap refresh 2026',
+  'gba_gap_refresh_2026|mtbs_audit': 'Both GBA gap refresh and MTBS / GBA audit',
+  'fire-damage-map|gba_gap_refresh_2026|mtbs_audit': 'All three acquisition datasets',
+  unclassified: 'Unclassified' };
 let DATA = null;
 let stageMode = 'compare';
 const fmt = n => Number(n || 0).toLocaleString();
@@ -167,6 +176,9 @@ function stagePanel(key) {
   const sourceRows = fp.sources.map(s => `<tr><td class="source-cell">${SOURCE_NAMES[s.source] || s.source}
       <div class="source-bar"><i style="width:${s.percent}%"></i></div></td>
       <td>${fmt(s.count)}</td><td>${s.percent.toFixed(2)}%</td><td>${fmt(s.event_count)}</td></tr>`).join('');
+  const datasetRows = fp.datasets.map(s => `<tr><td class="source-cell">${DATASET_NAMES[s.dataset] || s.dataset}
+      <div class="source-bar"><i style="width:${s.percent}%"></i></div></td>
+      <td>${fmt(s.count)}</td><td>${s.percent.toFixed(2)}%</td></tr>`).join('');
   const stageLabel = key === 'before' ? 'Before model · Human survey only' : 'After model · Human + predicted';
   return `<article class="stage stage-${key}">
     <div class="stage-title"><h2>${stageLabel}</h2><span>${key === 'before' ? 'source observations' : 'unique labelled buildings'}</span></div>
@@ -174,7 +186,7 @@ function stagePanel(key) {
       <div class="card"><div class="value">${fmt(e.unique_events)}</div><div class="label">Deduplicated fire events</div></div>
       <div class="card"><div class="value">${fmt(e.matched_mtbs_events)}</div><div class="label">Unique matched MTBS events</div></div>
       <div class="card"><div class="value">${fmt(selected.total)}</div><div class="label">${category} damage records</div></div>
-      <div class="card"><div class="value">${fmt(fp.layer_total)}</div><div class="label">Complete footprint map layer</div></div>
+      <div class="card"><div class="value">${fmt(fp.layer_total)}</div><div class="label">Unique footprint polygons · ${fmt(fp.raw_layer_total)} raw rows</div></div>
       <div class="card"><div class="value">${fmt(fp.total)}</div><div class="label">Footprints inside matched perimeters · ${pct(fp.total, fp.layer_total)}</div></div>
     </div>
     <div class="flow">
@@ -197,9 +209,13 @@ function stagePanel(key) {
         <tbody>${rows}</tbody></table></div>
     </section>
     <section class="box layer-footprints ${filter !== 'all' && filter !== 'footprints' ? 'hidden' : ''}">
-      <div class="box-head"><h3>3 · Building footprints inside matched perimeters</h3><span>${fmt(fp.total)} inside / ${fmt(fp.layer_total)} map-layer total · ${fmt(fp.events_with_layer)} events covered</span></div>
+      <div class="box-head"><h3>3 · Deduplicated building footprints inside matched perimeters</h3><span>${fmt(fp.total)} inside / ${fmt(fp.layer_total)} unique polygons · ${fmt(fp.events_with_layer)} events covered</span></div>
+      <div class="subtable-title">Underlying provider attribution · GBA acquisitions normally retain Microsoft / OSM source tags</div>
       <div class="table-scroll"><table><thead><tr><th>Footprint source</th><th>Count</th><th>Share</th><th>Events covered</th></tr></thead>
         <tbody>${sourceRows}<tr class="total-row"><td>Total</td><td>${fmt(fp.total)}</td><td>100.00%</td><td>${fmt(fp.events_with_layer)}</td></tr></tbody></table></div>
+      <div class="subtable-title">Acquisition dataset · ${fmt(fp.gba_audit_count)} (${fp.gba_audit_percent.toFixed(2)}%) involve GBA acquisition workflows</div>
+      <div class="table-scroll"><table><thead><tr><th>Acquisition dataset</th><th>Count</th><th>Share</th></tr></thead>
+        <tbody>${datasetRows}<tr class="total-row"><td>Total</td><td>${fmt(fp.total)}</td><td>100.00%</td></tr></tbody></table></div>
     </section>
   </article>`;
 }
